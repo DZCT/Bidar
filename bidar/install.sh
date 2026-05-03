@@ -36,10 +36,11 @@ head1() { echo -e "\n${C_BOLD}${C_MAGENTA}━━ $* ━━${C_RESET}\n"; }
 
 # ──────────────── ورودی تعاملی امن (حتی وقتی با pipe اجرا بشه) ────────────────
 ask() {
-  # $1=prompt, $2=var_name, $3=default(optional), $4=secret(0/1)
-  local prompt="$1" var="$2" default="${3:-}" secret="${4:-0}" input=""
+  # $1=prompt, $2=var_name, $3=default(optional), $4=secret(0/1), $5=allow_empty(0/1)
+  local prompt="$1" var="$2" default="${3:-}" secret="${4:-0}" allow_empty="${5:-0}" input=""
   local suffix=""
   [[ -n "$default" ]] && suffix=" ${C_YELLOW}[$default]${C_RESET}"
+  [[ "$allow_empty" == "1" ]] && suffix+=" ${C_CYAN}(Enter برای رد)${C_RESET}"
   while true; do
     if [[ "$secret" == "1" ]]; then
       echo -en "${C_BLUE}?${C_RESET} ${prompt}${suffix}: " >&2
@@ -50,7 +51,7 @@ ask() {
       IFS= read -r input < /dev/tty || true
     fi
     input="${input:-$default}"
-    if [[ -n "$input" ]]; then
+    if [[ -n "$input" ]] || [[ "$allow_empty" == "1" ]]; then
       printf -v "$var" '%s' "$input"
       return 0
     fi
@@ -231,7 +232,9 @@ setup_venv() {
   head1 "ساخت محیط مجازی پایتون"
   $SUDO python3 -m venv "${INSTALL_DIR}/venv"
   $SUDO "${INSTALL_DIR}/venv/bin/pip" install --upgrade pip >/dev/null
-  $SUDO "${INSTALL_DIR}/venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
+  # emergentintegrations از index خاص خودش نصب میشه
+  $SUDO "${INSTALL_DIR}/venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt" \
+    --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/
   ok "venv ساخته شد و پکیج‌ها نصب شدن."
 }
 
@@ -249,13 +252,20 @@ prompt_env() {
   echo -e "${C_BOLD}📌 اگه هنوز نگرفتی، API_ID و API_HASH رو از اینجا بگیر:${C_RESET}"
   echo -e "   ${C_CYAN}https://my.telegram.org/apps${C_RESET}\n"
 
-  local API_ID API_HASH PHONE AFK_MSG AFK_CD
+  local API_ID API_HASH PHONE AFK_MSG AFK_CD EMERGENT_KEY=""
   ask "API_ID (عدد)"                                   API_ID
   ask "API_HASH"                                       API_HASH "" 1
   ask "شماره موبایل (با کد کشور، مثل +989121234567)"    PHONE
   ask "متن پیش‌فرض AFK"                                AFK_MSG \
       "سلام 👋 الان در دسترس نیستم، پیامت رو دیدم و به زودی پاسخ میدم 🙏"
   ask "Cooldown پاسخ AFK به هر نفر (ثانیه)"            AFK_CD "1800"
+
+  echo ""
+  echo -e "${C_BOLD}🧠 دستیار هوش مصنوعی (اختیاری):${C_RESET}"
+  echo -e "   ${C_CYAN}از پروفایل Emergent → Universal Key کلیدت رو کپی کن${C_RESET}"
+  if ask_yes_no "می‌خوای دستیار AI رو فعال کنی؟" "Y"; then
+    ask "EMERGENT_LLM_KEY" EMERGENT_KEY "" 1 1
+  fi
 
   local tmp; tmp=$(mktemp)
   cat > "$tmp" <<EOF
@@ -267,6 +277,9 @@ SESSION_NAME=bidar_session
 AFK_MESSAGE=${AFK_MSG}
 AFK_COOLDOWN=${AFK_CD}
 CMD_PREFIX=.
+
+# ─── AI Assistant (Emergent Universal Key) ───
+EMERGENT_LLM_KEY=${EMERGENT_KEY}
 EOF
   $SUDO mv "$tmp" "${INSTALL_DIR}/.env"
   $SUDO chmod 600 "${INSTALL_DIR}/.env"

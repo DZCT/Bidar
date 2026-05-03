@@ -1,11 +1,13 @@
 """
-Bidar — یوزربات تلگرام همیشه آنلاین 🌙
-============================================
+Bidar — یوزربات تلگرام همیشه آنلاین با دستیار AI 🌙🤖
+============================================================
 
 امکانات:
-  • آنلاین واقعی (با UpdateStatusRequest هر ۴ دقیقه)
-  • پاسخ خودکار قابل تنظیم با cooldown هوشمند
-  • تنظیمات قابل ویرایش در زمان اجرا با دستور (و ذخیره پایدار در JSON)
+  • آنلاین واقعی (UpdateStatusRequest دوره‌ای)
+  • پاسخ خودکار ثابت یا هوشمند با GPT/Claude/Gemini (Emergent Universal Key)
+  • حفظ context مکالمه در چت خصوصی و گروه
+  • در گروه: فقط موقع mention یا reply پاسخ میده
+  • تنظیمات پایدار JSON و قابل ویرایش از داخل چت
   • قفل مالکیت دوگانه: همه دستورات فقط برای خود مالک
 
 دستورات رو با .help ببین.
@@ -24,6 +26,15 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.functions.account import UpdateStatusRequest
 
+# Optional: AI integration via Emergent Universal Key
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage  # type: ignore
+    AI_LIB_OK = True
+except ImportError:  # کتابخونه نصب نباشه، AI غیرفعال میشه
+    AI_LIB_OK = False
+    LlmChat = None  # type: ignore
+    UserMessage = None  # type: ignore
+
 # ───────────────────────── پیکربندی پایه (.env) ─────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -33,16 +44,30 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.2.0"
+VERSION = "1.3.0"
+
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
 DEFAULT_AUTOREPLY = os.environ.get(
     "AFK_MESSAGE",
     "سلام 👋 الان در دسترس نیستم، پیامت رو دیدم و به زودی پاسخ میدم 🙏",
 )
 DEFAULT_COOLDOWN = int(os.environ.get("AFK_COOLDOWN", "1800"))
-DEFAULT_ONLINE_INTERVAL = 240  # ثانیه — پیش‌فرض ۴ دقیقه
-MIN_ONLINE_INTERVAL = 30       # پایین‌تر از این فشار بی‌مورد به سرور میاد
-MAX_ONLINE_INTERVAL = 300      # بالاتر از این، تلگرام وسطش آفلاینت میکنه
+DEFAULT_ONLINE_INTERVAL = 240
+MIN_ONLINE_INTERVAL = 30
+MAX_ONLINE_INTERVAL = 300
+GROUP_REPLY_COOLDOWN = 30  # ثانیه — در گروه به همون نفر/چت
+
+DEFAULT_AI_PERSONALITY = (
+    "این پیام از طرف یک شخص است که می‌خواهد با صاحب اکانت صحبت کند. "
+    "صاحب اکانت در حال حاضر در دسترس نیست و شما از طرف او پاسخ می‌دهید. "
+    "جایگزین صاحب اکانت شو و به صورت طبیعی، کوتاه، مودب و دوستانه پاسخ بده. "
+    "خودت را به عنوان ربات، هوش مصنوعی یا دستیار معرفی نکن — جوری رفتار کن "
+    "که انگار صاحب اکانت هستی و فقط نمی‌تونی الان طولانی جواب بدی. "
+    "اگر کسی پرسید کی برمی‌گردی یا در دسترس میشی، بگو «به زودی» یا «خبر می‌دم». "
+    "از زبان کاربر (فارسی/انگلیسی) استفاده کن که بهت پیام داده. "
+    "در گروه‌ها، فضای مکالمه را در نظر بگیر و مناسب جواب بده."
+)
 
 # ───────────────────────── تنظیمات پایدار (JSON) ─────────────────────────
 CONFIG_FILE = BASE_DIR / "bidar_config.json"
@@ -53,6 +78,11 @@ _DEFAULT_CONFIG = {
     "autoreply_message": DEFAULT_AUTOREPLY,
     "autoreply_cooldown": DEFAULT_COOLDOWN,
     "online_refresh_interval": DEFAULT_ONLINE_INTERVAL,
+    # AI
+    "ai_enabled": False,
+    "ai_model": "gemini-3-flash-preview",
+    "ai_personality": DEFAULT_AI_PERSONALITY,
+    "ai_groups_enabled": False,
 }
 
 config: dict = dict(_DEFAULT_CONFIG)
@@ -81,8 +111,16 @@ def save_config() -> None:
 
 # ─────────────── وضعیت در زمان اجرا (in-memory) ───────────────
 OWNER_ID: int | None = None
-replied_users: dict[int, float] = {}
-stats = {"start_time": time.time(), "replies_sent": 0, "messages_received": 0}
+replied_users: dict[int | str, float] = {}  # برای cooldown (int برای private, str برای groups)
+stats = {
+    "start_time": time.time(),
+    "replies_sent": 0,
+    "messages_received": 0,
+    "ai_replies": 0,
+}
+
+# session_id -> LlmChat instance
+_chat_sessions: dict[str, object] = {}
 
 # ───────────────────────── لاگ ─────────────────────────
 logging.basicConfig(
@@ -123,7 +161,6 @@ def _is_owner(event) -> bool:
 
 
 def owner_only(handler):
-    """دکوریتور امنیتی: دستور فقط برای مالک اکانت."""
     async def wrapper(event):
         if not _is_owner(event):
             log.warning(
@@ -136,25 +173,72 @@ def owner_only(handler):
 
 
 def _parse_on_off(arg: str | None, current: bool) -> bool:
-    """ورودی on/off رو به bool تبدیل میکنه؛ اگه arg نداشت toggle میکنه."""
     if arg is None:
         return not current
     return arg.strip().lower() in {"on", "روشن", "1", "true", "yes"}
 
 
+def _infer_provider(model: str) -> str:
+    """بر اساس اسم مدل، ارائه‌دهنده رو تشخیص میده."""
+    m = (model or "").lower()
+    if m.startswith("gemini"):
+        return "gemini"
+    if m.startswith("claude"):
+        return "anthropic"
+    if m.startswith(("gpt", "o1", "o3", "o4")):
+        return "openai"
+    return "gemini"  # پیش‌فرض
+
+
+def _ai_ready() -> tuple[bool, str]:
+    if not AI_LIB_OK:
+        return False, "کتابخونه emergentintegrations نصب نیست"
+    if not EMERGENT_LLM_KEY:
+        return False, "EMERGENT_LLM_KEY در .env ست نشده"
+    return True, ""
+
+
+def _reset_chat_sessions() -> None:
+    _chat_sessions.clear()
+
+
+def _get_chat_session(session_id: str):
+    if session_id in _chat_sessions:
+        return _chat_sessions[session_id]
+    provider = _infer_provider(config["ai_model"])
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=config["ai_personality"],
+    ).with_model(provider, config["ai_model"])
+    _chat_sessions[session_id] = chat
+    return chat
+
+
+async def _ai_respond(session_id: str, user_text: str) -> str | None:
+    ready, _ = _ai_ready()
+    if not ready:
+        return None
+    text = (user_text or "").strip()
+    if not text:
+        return None
+    try:
+        chat = _get_chat_session(session_id)
+        resp = await chat.send_message(UserMessage(text=text))
+        stats["ai_replies"] += 1
+        return str(resp).strip()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"AI error on {session_id}: {e}")
+        return None
+
+
 # ─────────────────────── تسک پس‌زمینه: آنلاین نگه دار ─────────────────────
 async def online_keeper() -> None:
-    """
-    هر `online_refresh_interval` ثانیه یه بار وضعیت آنلاین رو رفرش میکنه.
-    بدون این، بعد از ~۵ دقیقه از نظر دیگران آفلاین نشون داده میشی.
-    مقدار از config خوانده میشه، پس تغییراتش در چرخه بعدی اعمال میشه.
-    """
     await asyncio.sleep(3)
     last_sent_offline: bool | None = None
     while True:
         try:
             desired_offline = not config["online_enabled"]
-            # اگه تغییر کرده یا روشنه (باید رفرش بشه)، درخواست بفرست
             if desired_offline != last_sent_offline or not desired_offline:
                 await client(UpdateStatusRequest(offline=desired_offline))
                 last_sent_offline = desired_offline
@@ -164,13 +248,15 @@ async def online_keeper() -> None:
                     log.debug("🟢 وضعیت آنلاین رفرش شد")
         except Exception as e:  # noqa: BLE001
             log.error(f"online_keeper: {e}")
-        # بازه رفرش از config (قابل تغییر با .interval)
         interval = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
         interval = max(MIN_ONLINE_INTERVAL, min(MAX_ONLINE_INTERVAL, interval))
         await asyncio.sleep(interval)
 
 
-# ─────────────────────── دستورات یوزربات ─────────────────────
+# ═════════════════════════════════════════════════════════════════
+# ║               دستورات یوزربات (همه owner-only)                ║
+# ═════════════════════════════════════════════════════════════════
+
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}ping$"))
 @owner_only
 async def cmd_ping(event):
@@ -190,7 +276,6 @@ async def cmd_online(event):
     )
     config["online_enabled"] = new
     save_config()
-    # اعمال فوری
     try:
         await client(UpdateStatusRequest(offline=not new))
     except Exception as e:  # noqa: BLE001
@@ -198,6 +283,38 @@ async def cmd_online(event):
     await event.edit(
         f"📡 **آنلاین دائم: {'روشن 🟢' if new else 'خاموش 🔴'}**\n"
         f"_بر اساس تنظیمات privacy تلگرامت نمایش داده میشه._"
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}interval(?:\s+(\d+)([smSM]?))?$"))
+@owner_only
+async def cmd_interval(event):
+    num = event.pattern_match.group(1)
+    unit = (event.pattern_match.group(2) or "s").lower()
+    if num is None:
+        current = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
+        await event.edit(
+            "⏱ **بازه رفرش آنلاین**\n\n"
+            f"📊 مقدار فعلی: `{current}s` (~{current // 60}m {current % 60}s)\n"
+            f"🔢 محدوده مجاز: `{MIN_ONLINE_INTERVAL}` تا `{MAX_ONLINE_INTERVAL}` ثانیه\n\n"
+            f"🛠 برای تغییر:\n"
+            f"  `{CMD_PREFIX}interval 180`  → ۱۸۰ ثانیه\n"
+            f"  `{CMD_PREFIX}interval 3m`   → ۳ دقیقه"
+        )
+        return
+    value = int(num)
+    if unit == "m":
+        value *= 60
+    if value < MIN_ONLINE_INTERVAL or value > MAX_ONLINE_INTERVAL:
+        await event.edit(
+            f"⚠️ مقدار باید بین `{MIN_ONLINE_INTERVAL}s` تا `{MAX_ONLINE_INTERVAL}s` باشه."
+        )
+        return
+    config["online_refresh_interval"] = value
+    save_config()
+    await event.edit(
+        "✅ **بازه رفرش آپدیت شد**\n"
+        f"⏱ مقدار جدید: `{value}s` (~{value // 60}m {value % 60}s)"
     )
 
 
@@ -224,17 +341,12 @@ async def cmd_setmsg(event):
     new_msg = event.pattern_match.group(1).strip()
     config["autoreply_message"] = new_msg
     save_config()
-    await event.edit(
-        "✅ **متن پاسخ خودکار آپدیت شد**\n\n"
-        f"📝 متن جدید:\n`{new_msg}`"
-    )
+    await event.edit(f"✅ **متن پاسخ خودکار آپدیت شد**\n\n📝 متن جدید:\n`{new_msg}`")
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}afk(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_afk(event):
-    """میانبر: `.afk <متن>` متن رو آپدیت + پاسخ خودکار روشن
-       `.afk` بدون آرگومان → toggle پاسخ خودکار"""
     reason = event.pattern_match.group(1)
     reason_l = reason.strip().lower() if reason else None
 
@@ -246,7 +358,6 @@ async def cmd_afk(event):
         return
 
     if reason and reason_l not in {"on", "روشن"}:
-        # متن جدید دریافت شد → ذخیره + روشن کردن
         config["autoreply_message"] = reason.strip()
 
     config["autoreply_enabled"] = True
@@ -257,64 +368,140 @@ async def cmd_afk(event):
     )
 
 
-@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}interval(?:\s+(\d+)([smSM]?))?$"))
+# ═════════ دستورات AI ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}ai(?:\s+(on|off|روشن|خاموش))?$"))
 @owner_only
-async def cmd_interval(event):
-    """تنظیم بازه رفرش آنلاین (پیش‌فرض ۲۴۰ ثانیه = ۴ دقیقه)."""
-    num = event.pattern_match.group(1)
-    unit = (event.pattern_match.group(2) or "s").lower()
-
-    if num is None:
-        current = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
+async def cmd_ai(event):
+    arg = event.pattern_match.group(1)
+    ready, err_msg = _ai_ready()
+    if not ready:
         await event.edit(
-            "⏱ **بازه رفرش آنلاین**\n\n"
-            f"📊 مقدار فعلی: `{current}s` (~{current // 60}m {current % 60}s)\n"
-            f"🔢 محدوده مجاز: `{MIN_ONLINE_INTERVAL}` تا `{MAX_ONLINE_INTERVAL}` ثانیه\n\n"
-            f"🛠 برای تغییر:\n"
-            f"  `{CMD_PREFIX}interval 180`  → ۱۸۰ ثانیه\n"
-            f"  `{CMD_PREFIX}interval 3m`   → ۳ دقیقه (۱۸۰ ثانیه)\n"
-            f"  `{CMD_PREFIX}interval 240`  → پیش‌فرض (۴ دقیقه)"
+            f"❌ **AI قابل استفاده نیست:** {err_msg}\n\n"
+            "🔧 راه‌حل:\n"
+            "  • اگه کتابخونه نیست:\n"
+            "    `pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`\n"
+            "  • اگه کلید نیست: `EMERGENT_LLM_KEY=...` رو در `.env` ست کن و ربات رو ری‌استارت کن."
         )
         return
-
-    value = int(num)
-    if unit == "m":
-        value *= 60
-
-    if value < MIN_ONLINE_INTERVAL or value > MAX_ONLINE_INTERVAL:
-        await event.edit(
-            "⚠️ **مقدار خارج از محدوده‌ست.**\n\n"
-            f"🔢 محدوده مجاز: `{MIN_ONLINE_INTERVAL}s` تا `{MAX_ONLINE_INTERVAL}s`\n"
-            f"🔽 پایین‌تر از `{MIN_ONLINE_INTERVAL}s`: فشار بی‌مورد به سرور تلگرام\n"
-            f"🔼 بالاتر از `{MAX_ONLINE_INTERVAL}s`: وسط رفرش‌ها آفلاین میشی"
-        )
-        return
-
-    config["online_refresh_interval"] = value
+    new = _parse_on_off(
+        None if arg is None else ("on" if arg in {"on", "روشن"} else "off"),
+        config.get("ai_enabled", False),
+    )
+    config["ai_enabled"] = new
     save_config()
     await event.edit(
-        "✅ **بازه رفرش آپدیت شد**\n\n"
-        f"⏱ مقدار جدید: `{value}s` (~{value // 60}m {value % 60}s)\n"
-        f"ℹ️ تغییر در چرخه بعدی رفرش اعمال میشه."
+        f"🤖 **دستیار AI: {'روشن 🟢' if new else 'خاموش 🔴'}**\n\n"
+        f"📚 مدل: `{config['ai_model']}`\n"
+        f"💬 در گروه‌ها: `{'روشن' if config.get('ai_groups_enabled') else 'خاموش'}`\n\n"
+        "ℹ️ در چت خصوصی، وقتی پاسخ خودکار روشن باشه، AI پاسخ میده."
     )
 
 
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}aigroups(?:\s+(on|off|روشن|خاموش))?$"))
+@owner_only
+async def cmd_aigroups(event):
+    arg = event.pattern_match.group(1)
+    new = _parse_on_off(
+        None if arg is None else ("on" if arg in {"on", "روشن"} else "off"),
+        config.get("ai_groups_enabled", False),
+    )
+    config["ai_groups_enabled"] = new
+    save_config()
+    await event.edit(
+        f"💬 **AI در گروه‌ها: {'روشن 🟢' if new else 'خاموش 🔴'}**\n\n"
+        "ℹ️ در گروه فقط وقتی پاسخ میده که:\n"
+        "  • کسی بهت reply بزنه\n"
+        "  • کسی با @username منشنت کنه\n\n"
+        "🧠 حافظه مکالمه گروه حفظ میشه (تا ریست کنی)."
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}personality(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_personality(event):
+    new_text = event.pattern_match.group(1)
+    if new_text is None:
+        await event.edit(
+            "🎭 **شخصیت فعلی دستیار:**\n\n"
+            f"`{config['ai_personality']}`\n\n"
+            f"برای تغییر: `{CMD_PREFIX}personality <متن جدید>`\n"
+            f"برای ریست به پیش‌فرض: `{CMD_PREFIX}personality reset`"
+        )
+        return
+    text = new_text.strip()
+    if text.lower() in {"reset", "default", "پیشفرض"}:
+        config["ai_personality"] = DEFAULT_AI_PERSONALITY
+    else:
+        config["ai_personality"] = text
+    save_config()
+    _reset_chat_sessions()
+    await event.edit(
+        "✅ **شخصیت دستیار آپدیت شد**\n\n"
+        f"🎭 متن جدید:\n`{config['ai_personality']}`\n\n"
+        "🔄 همه مکالمات قبلی ریست شدن."
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}aimodel(?:\s+(\S+))?$"))
+@owner_only
+async def cmd_aimodel(event):
+    arg = event.pattern_match.group(1)
+    if arg is None:
+        await event.edit(
+            f"📚 **مدل فعلی:** `{config['ai_model']}`\n\n"
+            "🌟 مدل‌های پیشنهادی:\n"
+            f"  `{CMD_PREFIX}aimodel gemini-3-flash-preview` ⚡ (پیش‌فرض)\n"
+            f"  `{CMD_PREFIX}aimodel gemini-2.5-pro`\n"
+            f"  `{CMD_PREFIX}aimodel claude-sonnet-4-5-20250929`\n"
+            f"  `{CMD_PREFIX}aimodel gpt-5.2`\n"
+            f"  `{CMD_PREFIX}aimodel gpt-4o-mini` (ارزون)"
+        )
+        return
+    config["ai_model"] = arg
+    save_config()
+    _reset_chat_sessions()
+    await event.edit(
+        f"✅ **مدل AI آپدیت شد**\n\n"
+        f"📚 مدل جدید: `{arg}`\n"
+        f"🏢 ارائه‌دهنده: `{_infer_provider(arg)}`\n"
+        "🔄 همه مکالمات ریست شدن."
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}aireset$"))
+@owner_only
+async def cmd_aireset(event):
+    count = len(_chat_sessions)
+    _reset_chat_sessions()
+    await event.edit(f"🔄 **حافظه AI ریست شد.** `{count}` session پاک شد.")
+
+
+# ═════════ دستورات اطلاعاتی ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}stats$"))
 @owner_only
 async def cmd_stats(event):
     uptime = time.time() - stats["start_time"]
     interval = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
+    ready, ai_err = _ai_ready()
+    ai_status = "روشن 🟢" if config.get("ai_enabled") and ready else "خاموش 🔴"
     text = (
         "📊 **آمار و تنظیمات Bidar**\n\n"
         f"⏱ آپ‌تایم: `{_fmt_uptime(uptime)}`\n"
         f"📡 آنلاین دائم: `{'روشن 🟢' if config['online_enabled'] else 'خاموش 🔴'}`\n"
-        f"🔄 بازه رفرش آنلاین: `{interval}s` (~{interval // 60}m)\n"
-        f"🤖 پاسخ خودکار: `{'روشن 🟢' if config['autoreply_enabled'] else 'خاموش 🔴'}`\n"
-        f"📨 پیام‌های خصوصی دریافتی: `{stats['messages_received']}`\n"
-        f"✉️ پاسخ‌های خودکار ارسالی: `{stats['replies_sent']}`\n"
-        f"⏳ Cooldown پاسخ: `{config['autoreply_cooldown']}s`\n\n"
-        f"📝 متن پاسخ خودکار:\n`{config['autoreply_message']}`"
+        f"🔄 بازه رفرش: `{interval}s` (~{interval // 60}m)\n"
+        f"🤖 پاسخ خودکار: `{'روشن 🟢' if config['autoreply_enabled'] else 'خاموش 🔴'}`\n\n"
+        f"🧠 **دستیار AI:** `{ai_status}`\n"
+        f"  📚 مدل: `{config['ai_model']}`\n"
+        f"  💬 در گروه‌ها: `{'روشن' if config.get('ai_groups_enabled') else 'خاموش'}`\n"
+        f"  🗂 مکالمات فعال: `{len(_chat_sessions)}`\n\n"
+        f"📨 پیام‌های دریافتی: `{stats['messages_received']}`\n"
+        f"✉️ پاسخ‌های ارسالی: `{stats['replies_sent']}`\n"
+        f"🤖 پاسخ‌های AI: `{stats['ai_replies']}`\n"
+        f"⏳ Cooldown: `{config['autoreply_cooldown']}s`\n\n"
+        f"📝 متن ثابت (fallback):\n`{config['autoreply_message']}`"
     )
+    if not ready and config.get("ai_enabled"):
+        text += f"\n\n⚠️ AI فعاله ولی غیرقابل استفاده: {ai_err}"
     await event.edit(text)
 
 
@@ -325,10 +512,10 @@ async def cmd_alive(event):
     await event.edit(
         "✨ **Bidar زنده و آنلاینه** 🌙\n\n"
         f"⏱ آپ‌تایم: `{_fmt_uptime(uptime)}`\n"
-        f"📡 آنلاین دائم: `{'روشن' if config['online_enabled'] else 'خاموش'}`\n"
+        f"📡 آنلاین: `{'روشن' if config['online_enabled'] else 'خاموش'}`\n"
         f"🤖 پاسخ خودکار: `{'روشن' if config['autoreply_enabled'] else 'خاموش'}`\n"
-        f"🔖 نسخه: `v{VERSION}`\n"
-        f"📚 کتابخونه: `Telethon`"
+        f"🧠 AI: `{'روشن' if config.get('ai_enabled') else 'خاموش'}`\n"
+        f"🔖 نسخه: `v{VERSION}`"
     )
 
 
@@ -358,46 +545,52 @@ async def cmd_help(event):
     text = (
         "🤖 **Bidar — راهنمای کامل دستورات**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🔹 **وضعیت آنلاین**\n"
-        f"  `{CMD_PREFIX}online on` — آنلاین دائم روشن\n"
-        f"  `{CMD_PREFIX}online off` — خاموش (آفلاین نشون داده میشی)\n"
-        f"  `{CMD_PREFIX}online` — جابه‌جا (toggle)\n"
-        f"  `{CMD_PREFIX}interval <ثانیه>` — تنظیم بازه رفرش (پیش‌فرض ۲۴۰=۴m)\n"
-        f"  `{CMD_PREFIX}interval` — نمایش مقدار فعلی\n"
-        "  ℹ️ با روشن بودن آنلاین، هر چند دقیقه وضعیتت رفرش میشه\n"
-        "     تا همیشه برای بقیه «آنلاین» نشون بدی.\n\n"
-        "🔹 **پاسخ خودکار**\n"
-        f"  `{CMD_PREFIX}reply on` — پاسخ خودکار روشن\n"
-        f"  `{CMD_PREFIX}reply off` — خاموش\n"
-        f"  `{CMD_PREFIX}reply` — جابه‌جا (toggle)\n"
-        f"  `{CMD_PREFIX}setmsg <متن>` — ویرایش متن پاسخ خودکار\n"
-        f"  `{CMD_PREFIX}afk <متن>` — میانبر: ست متن + روشن کردن پاسخ\n"
-        f"  `{CMD_PREFIX}afk off` — خاموش کردن سریع\n\n"
-        "🔹 **اطلاعات**\n"
-        f"  `{CMD_PREFIX}alive` — چک زنده بودن ربات\n"
-        f"  `{CMD_PREFIX}ping` — تست تاخیر (ms)\n"
-        f"  `{CMD_PREFIX}stats` — همه آمار و تنظیمات فعلی\n"
-        f"  `{CMD_PREFIX}id` — آیدی چت (و یوزر اگه ریپلای بزنی)\n\n"
-        "🔹 **مدیریت**\n"
-        f"  `{CMD_PREFIX}restart` — ری‌استارت (در حالت systemd)\n"
-        f"  `{CMD_PREFIX}help` | `{CMD_PREFIX}menu` | `{CMD_PREFIX}commands` — همین راهنما\n\n"
+        "📡 **وضعیت آنلاین**\n"
+        f"  `{CMD_PREFIX}online on|off` — آنلاین دائم\n"
+        f"  `{CMD_PREFIX}interval <s>` — بازه رفرش (پیش‌فرض ۲۴۰s)\n\n"
+        "🤖 **پاسخ خودکار ثابت**\n"
+        f"  `{CMD_PREFIX}reply on|off` — روشن/خاموش\n"
+        f"  `{CMD_PREFIX}setmsg <متن>` — ویرایش متن\n"
+        f"  `{CMD_PREFIX}afk [متن]` — میانبر AFK\n\n"
+        "🧠 **دستیار AI**\n"
+        f"  `{CMD_PREFIX}ai on|off` — روشن/خاموش AI\n"
+        f"  `{CMD_PREFIX}aigroups on|off` — AI در گروه‌ها\n"
+        f"  `{CMD_PREFIX}personality <متن>` — تنظیم شخصیت\n"
+        f"  `{CMD_PREFIX}personality reset` — ریست به پیش‌فرض\n"
+        f"  `{CMD_PREFIX}aimodel <مدل>` — تغییر مدل\n"
+        f"  `{CMD_PREFIX}aireset` — پاک کردن حافظه مکالمات\n\n"
+        "📊 **اطلاعات**\n"
+        f"  `{CMD_PREFIX}alive` — زنده بودن\n"
+        f"  `{CMD_PREFIX}ping` — تست تاخیر\n"
+        f"  `{CMD_PREFIX}stats` — همه آمار\n"
+        f"  `{CMD_PREFIX}id` — آیدی چت/کاربر\n\n"
+        "🔧 **مدیریت**\n"
+        f"  `{CMD_PREFIX}restart` — ری‌استارت\n"
+        f"  `{CMD_PREFIX}help` — همین راهنما\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔒 همه دستورات فقط برای خودت کار میکنن.  🔖 v{VERSION}"
+        f"🔒 همه دستورات owner-only  •  🔖 v{VERSION}"
     )
     await event.edit(text)
 
 
-# ──────────────────── پاسخ خودکار به پیام‌های خصوصی ───────────────────
+# ═════════════════════════════════════════════════════════════════
+# ║              هندلر اصلی پیام‌های ورودی                         ║
+# ═════════════════════════════════════════════════════════════════
 @client.on(events.NewMessage(incoming=True))
-async def auto_reply(event):
-    if not event.is_private:
-        return
+async def handle_incoming(event):
     sender = await event.get_sender()
     if sender is None or getattr(sender, "bot", False):
         return
     if OWNER_ID is not None and sender.id == OWNER_ID:
         return
 
+    if event.is_private:
+        await _handle_private(event, sender)
+    else:
+        await _handle_group_or_channel(event, sender)
+
+
+async def _handle_private(event, sender) -> None:
     stats["messages_received"] += 1
 
     if not config["autoreply_enabled"]:
@@ -408,18 +601,80 @@ async def auto_reply(event):
     if now - last < config["autoreply_cooldown"]:
         return
 
+    response_text: str | None = None
+
+    # اگه AI روشنه، تلاش کن پاسخ هوشمند بگیری
+    if config.get("ai_enabled"):
+        ready, _ = _ai_ready()
+        if ready:
+            session_id = f"private_{sender.id}"
+            response_text = await _ai_respond(session_id, event.raw_text or "")
+
+    # fallback به متن ثابت
+    if not response_text:
+        response_text = config["autoreply_message"]
+
     try:
-        await event.reply(config["autoreply_message"])
+        await event.reply(response_text)
         replied_users[sender.id] = now
         stats["replies_sent"] += 1
         log.info(
-            f"پاسخ خودکار به {getattr(sender, 'first_name', '?')} (id={sender.id})"
+            f"پاسخ به {getattr(sender, 'first_name', '?')} (id={sender.id}) — "
+            f"{'AI' if config.get('ai_enabled') else 'static'}"
         )
     except Exception as e:  # noqa: BLE001
-        log.error(f"پاسخ خودکار ناموفق: {e}")
+        log.error(f"پاسخ ناموفق: {e}")
 
 
-# ─────────────────────────── اجرا ───────────────────────────
+async def _handle_group_or_channel(event, sender) -> None:
+    # در گروه‌ها فقط اگه AI + aigroups روشن باشه
+    if not (config.get("ai_enabled") and config.get("ai_groups_enabled")):
+        return
+
+    ready, _ = _ai_ready()
+    if not ready:
+        return
+
+    # تصمیم: این پیام مربوط به ما هست یا نه؟
+    should_respond = False
+    if getattr(event.message, "mentioned", False):
+        should_respond = True
+    elif event.is_reply:
+        try:
+            replied = await event.get_reply_message()
+            if replied and replied.sender_id == OWNER_ID:
+                should_respond = True
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not should_respond:
+        return
+
+    # cooldown برای گروه
+    chat_id = event.chat_id
+    key = f"g_{chat_id}"
+    now = time.time()
+    last = replied_users.get(key, 0)
+    if now - last < GROUP_REPLY_COOLDOWN:
+        return
+
+    session_id = f"group_{chat_id}"
+    response_text = await _ai_respond(session_id, event.raw_text or "")
+    if not response_text:
+        return
+
+    try:
+        await event.reply(response_text)
+        replied_users[key] = now
+        stats["replies_sent"] += 1
+        log.info(f"پاسخ گروه {chat_id} با AI")
+    except Exception as e:  # noqa: BLE001
+        log.error(f"پاسخ گروه ناموفق: {e}")
+
+
+# ═════════════════════════════════════════════════════════════════
+# ║                            اجرا                               ║
+# ═════════════════════════════════════════════════════════════════
 async def main():
     global OWNER_ID
     log.info("در حال اتصال به تلگرام...")
@@ -427,16 +682,21 @@ async def main():
     me = await client.get_me()
     OWNER_ID = me.id
     log.info(f"✅ لاگین شد: {me.first_name} (@{me.username}) — id={me.id}")
+
+    ready, err_msg = _ai_ready()
+    ai_info = f"🟢 آماده ({config['ai_model']})" if ready else f"🔴 {err_msg}"
+
     print(
-        "\n🌙 Bidar فعال شد!\n"
+        "\n🌙 Bidar v" + VERSION + " فعال شد!\n"
         f"   نام:     {me.first_name}\n"
         f"   یوزرنیم: @{me.username}\n"
         f"   آیدی:    {me.id}\n"
         f"   دستورات: {CMD_PREFIX}help\n"
-        f"   آنلاین دائم: {'روشن 🟢' if config['online_enabled'] else 'خاموش 🔴'}\n"
-        f"   پاسخ خودکار: {'روشن 🟢' if config['autoreply_enabled'] else 'خاموش 🔴'}\n"
+        f"   آنلاین: {'🟢' if config['online_enabled'] else '🔴'}  "
+        f"پاسخ خودکار: {'🟢' if config['autoreply_enabled'] else '🔴'}  "
+        f"AI: {'🟢' if config.get('ai_enabled') else '🔴'}\n"
+        f"   AI status: {ai_info}\n"
     )
-    # تسک‌های پس‌زمینه
     asyncio.create_task(online_keeper())
     await client.run_until_disconnected()
 

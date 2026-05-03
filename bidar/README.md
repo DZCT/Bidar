@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.2.0-success?style=flat-square)](https://github.com/MamawliV2/bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.3.0-success?style=flat-square)](https://github.com/MamawliV2/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -56,7 +56,8 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 **Bidar** یه یوزربات تلگرام سبک و امن با Telethon هست که:
 
 - ✅ اکانتت رو **۲۴/۷ واقعاً آنلاین** نشون میده
-- ✅ با **پاسخ خودکار هوشمند**، پیام‌های خصوصی رو مدیریت میکنه
+- ✅ با **پاسخ خودکار هوشمند AI**، پیام‌ها رو با مکالمه طبیعی مدیریت میکنه
+- ✅ در **گروه‌ها** هم می‌تونه با context پاسخ بده (فقط هنگام mention/reply)
 - ✅ همه تنظیمات رو **توی چت خود تلگرام** می‌تونی لایو تغییر بدی
 - ✅ دستورات **فقط مالک اکانت** کنترل میکنه — دو لایه امنیتی داره
 
@@ -82,6 +83,8 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 | 🛡 | **فقط چت خصوصی** | گروه‌ها، کانال‌ها و ربات‌ها نادیده گرفته میشن |
 | 📊 | **آمار زنده** | آپ‌تایم، تعداد پیام‌ها و پاسخ‌ها |
 | 📝 | **لاگ فایل** | همه رویدادها برای بررسی ثبت میشن |
+| 🧠 | **دستیار AI** | پاسخ هوشمند با Gemini/GPT/Claude از طریق Emergent Universal Key |
+| 👥 | **AI در گروه‌ها** | فقط هنگام mention یا reply، با حفظ context مکالمه |
 | 🔄 | **ری‌کانکت خودکار** | در صورت قطعی، خودش دوباره وصل میشه |
 
 </div>
@@ -191,6 +194,34 @@ sudo systemctl enable --now bidar
 | `.setmsg <متن>` | ویرایش متن پاسخ خودکار |
 | `.afk <متن>` | میانبر: متن جدید + روشن کردن پاسخ |
 | `.afk off` | خاموش کردن سریع |
+
+</div>
+
+### 🧠 دستیار هوشمند AI
+
+<div dir="rtl">
+
+وقتی AI روشنه، به جای پیام ثابت، با هوش مصنوعی (Gemini/GPT/Claude) پاسخ شخصی‌سازی شده و مکالمه‌ای می‌فرسته.
+
+| دستور | کاربرد |
+|:---|:---|
+| `.ai on` | روشن کردن دستیار AI |
+| `.ai off` | خاموش کردن |
+| `.aigroups on` | فعال کردن AI در گروه‌ها (فقط mention/reply) |
+| `.aigroups off` | خاموش کردن در گروه‌ها |
+| `.personality <متن>` | تنظیم شخصیت/لحن دستیار |
+| `.personality reset` | برگشت به شخصیت پیش‌فرض |
+| `.personality` | نمایش شخصیت فعلی |
+| `.aimodel <نام-مدل>` | تغییر مدل (gemini-3-flash-preview, gpt-5.2, ...) |
+| `.aimodel` | نمایش مدل فعلی و پیشنهادات |
+| `.aireset` | پاک کردن حافظه همه مکالمات |
+
+**نیازمند:** `EMERGENT_LLM_KEY` در `.env` (از پروفایل Emergent → Universal Key)
+
+**رفتار:**
+- 💬 **در چت خصوصی**: وقتی AFK روشنه، AI پاسخ شخصی‌سازی شده می‌ده با context (مکالمه طبیعی می‌مونه)
+- 👥 **در گروه‌ها**: فقط وقتی کسی به پیامت ریپلای بزنه یا `@username` کنه، با context گروه جواب میده
+- 🔄 **حافظه**: هر چت یه session جدا داره، مکالمات حفظ میشن تا `.aireset` بزنی
 
 </div>
 
