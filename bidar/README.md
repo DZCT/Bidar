@@ -107,7 +107,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 ## 🚀 نصب تک‌خطی
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/MamawliV2/bidar/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/MamawliV2/Bidar/main/bidar/install.sh)
 ```
 
 <div dir="rtl">
@@ -133,8 +133,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MamawliV2/bidar/main/install
 
 ```bash
 # کلون پروژه
-git clone https://github.com/MamawliV2/bidar.git /opt/bidar
-cd /opt/bidar
+git clone https://github.com/MamawliV2/Bidar.git /opt/bidar-repo
+cd /opt/bidar-repo/bidar
 
 # ساخت محیط مجازی
 python3 -m venv venv

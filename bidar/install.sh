@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ──────────────── پیکربندی پیش‌فرض ────────────────
-REPO_URL="${BIDAR_REPO:-https://github.com/MamawliV2/bidar.git}"
+REPO_URL="${BIDAR_REPO:-https://github.com/MamawliV2/Bidar.git}"
 INSTALL_DIR="${BIDAR_DIR:-/opt/bidar}"
 SERVICE_NAME="bidar"
 PYTHON_MIN="3.10"
@@ -188,13 +188,27 @@ fetch_project() {
     fi
   else
     say "کلون از: ${REPO_URL}"
-    if [[ -d "${INSTALL_DIR}/.git" ]]; then
-      warn "${INSTALL_DIR} قبلاً یه ریپو هست — git pull میزنم."
-      $SUDO git -C "${INSTALL_DIR}" pull --ff-only
+    local tmp_dir="/tmp/bidar-clone-$$"
+    rm -rf "$tmp_dir"
+    $SUDO git clone --depth 1 "${REPO_URL}" "$tmp_dir"
+
+    # تشخیص محل فایل‌ها: ریشه ریپو یا داخل bidar/ subfolder
+    local source_dir=""
+    if [[ -f "$tmp_dir/bidar.py" ]]; then
+      source_dir="$tmp_dir"
+      say "فایل‌ها در ریشه ریپو پیدا شدن."
+    elif [[ -f "$tmp_dir/bidar/bidar.py" ]]; then
+      source_dir="$tmp_dir/bidar"
+      say "فایل‌ها در subfolder bidar/ پیدا شدن."
     else
-      $SUDO mkdir -p "$(dirname "${INSTALL_DIR}")"
-      $SUDO git clone "${REPO_URL}" "${INSTALL_DIR}"
+      err "bidar.py در ریپو پیدا نشد! ساختار ریپو رو چک کن."
+      rm -rf "$tmp_dir"
+      exit 1
     fi
+
+    $SUDO mkdir -p "${INSTALL_DIR}"
+    $SUDO cp -r "$source_dir/." "${INSTALL_DIR}/"
+    rm -rf "$tmp_dir"
   fi
   ok "سورس در ${INSTALL_DIR} قرار گرفت."
 }
