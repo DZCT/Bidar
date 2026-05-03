@@ -190,7 +190,20 @@ fetch_project() {
     say "کلون از: ${REPO_URL}"
     local tmp_dir="/tmp/bidar-clone-$$"
     rm -rf "$tmp_dir"
-    $SUDO git clone --depth 1 "${REPO_URL}" "$tmp_dir"
+
+    # اگه توکن گیت‌هاب تنظیم شده (برای ریپو private)
+    local clone_url="${REPO_URL}"
+    if [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]]; then
+      local token="${GH_TOKEN:-${GITHUB_TOKEN}}"
+      clone_url="${REPO_URL/https:\/\//https://oauth2:${token}@}"
+      say "🔑 از توکن گیت‌هاب برای دسترسی استفاده میشه"
+    fi
+
+    if ! $SUDO git clone --depth 1 "$clone_url" "$tmp_dir" 2>&1 | sed "s/${GH_TOKEN:-NOTSET}/***/g; s/${GITHUB_TOKEN:-NOTSET}/***/g"; then
+      err "کلون ناموفق. اگه ریپو private هست، مطمئن شو GH_TOKEN تنظیم شده."
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
 
     # تشخیص محل فایل‌ها: ریشه ریپو یا داخل bidar/ subfolder
     local source_dir=""
