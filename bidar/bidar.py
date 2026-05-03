@@ -44,7 +44,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -56,7 +56,7 @@ DEFAULT_COOLDOWN = int(os.environ.get("AFK_COOLDOWN", "1800"))
 DEFAULT_ONLINE_INTERVAL = 240
 MIN_ONLINE_INTERVAL = 30
 MAX_ONLINE_INTERVAL = 300
-GROUP_REPLY_COOLDOWN = 30  # ثانیه — در گروه به همون نفر/چت
+DEFAULT_GROUP_COOLDOWN = 0  # ثانیه — 0 یعنی بدون تاخیر (به همه replyها جواب میده)
 
 DEFAULT_AI_PERSONALITY = (
     "این پیام از طرف یک شخص است که می‌خواهد با صاحب اکانت صحبت کند. "
@@ -83,6 +83,7 @@ _DEFAULT_CONFIG = {
     "ai_model": "gemini-3-flash-preview",
     "ai_personality": DEFAULT_AI_PERSONALITY,
     "ai_groups_enabled": False,
+    "group_cooldown": DEFAULT_GROUP_COOLDOWN,
 }
 
 config: dict = dict(_DEFAULT_CONFIG)
@@ -468,6 +469,34 @@ async def cmd_aimodel(event):
     )
 
 
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}groupcd(?:\s+(\d+))?$"))
+@owner_only
+async def cmd_groupcd(event):
+    """تنظیم cooldown پاسخ AI در گروه (ثانیه). 0 = بدون محدودیت."""
+    arg = event.pattern_match.group(1)
+    if arg is None:
+        current = int(config.get("group_cooldown", DEFAULT_GROUP_COOLDOWN))
+        await event.edit(
+            "⏳ **Cooldown پاسخ AI در گروه**\n\n"
+            f"📊 مقدار فعلی: `{current}s` "
+            f"{'(بدون محدودیت)' if current == 0 else f'(~{current // 60}m {current % 60}s در هر نفر)'}\n\n"
+            "🛠 برای تغییر:\n"
+            f"  `{CMD_PREFIX}groupcd 0`   → بدون محدودیت (پیش‌فرض)\n"
+            f"  `{CMD_PREFIX}groupcd 10`  → ۱۰ ثانیه بین پاسخ‌ها به هر کاربر\n"
+            f"  `{CMD_PREFIX}groupcd 60`  → ۱ دقیقه\n\n"
+            "ℹ️ cooldown به ازای هر **کاربر** در گروه اعمال میشه، نه کل گروه."
+        )
+        return
+    value = int(arg)
+    if value < 0 or value > 3600:
+        await event.edit("⚠️ مقدار باید بین `0` تا `3600` ثانیه باشه.")
+        return
+    config["group_cooldown"] = value
+    save_config()
+    state = "بدون محدودیت ⚡" if value == 0 else f"`{value}s` در هر کاربر"
+    await event.edit(f"✅ **Group Cooldown آپدیت شد**\n⏳ مقدار جدید: {state}")
+
+
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}aireset$"))
 @owner_only
 async def cmd_aireset(event):
@@ -493,6 +522,8 @@ async def cmd_stats(event):
         f"🧠 **دستیار AI:** `{ai_status}`\n"
         f"  📚 مدل: `{config['ai_model']}`\n"
         f"  💬 در گروه‌ها: `{'روشن' if config.get('ai_groups_enabled') else 'خاموش'}`\n"
+        f"  ⏳ Group cooldown: `{config.get('group_cooldown', 0)}s`"
+        f"{' (بدون محدودیت)' if config.get('group_cooldown', 0) == 0 else ''}\n"
         f"  🗂 مکالمات فعال: `{len(_chat_sessions)}`\n\n"
         f"📨 پیام‌های دریافتی: `{stats['messages_received']}`\n"
         f"✉️ پاسخ‌های ارسالی: `{stats['replies_sent']}`\n"
@@ -558,6 +589,7 @@ async def cmd_help(event):
         f"  `{CMD_PREFIX}personality <متن>` — تنظیم شخصیت\n"
         f"  `{CMD_PREFIX}personality reset` — ریست به پیش‌فرض\n"
         f"  `{CMD_PREFIX}aimodel <مدل>` — تغییر مدل\n"
+        f"  `{CMD_PREFIX}groupcd <s>` — cooldown گروه (۰=بدون محدودیت)\n"
         f"  `{CMD_PREFIX}aireset` — پاک کردن حافظه مکالمات\n\n"
         "📊 **اطلاعات**\n"
         f"  `{CMD_PREFIX}alive` — زنده بودن\n"
@@ -682,25 +714,27 @@ async def _handle_group_or_channel(event, sender) -> None:
     if not should_respond:
         return
 
-    # cooldown برای گروه
+    # cooldown برای گروه (فقط اگه > 0 باشه اعمال میشه)
     chat_id = event.chat_id
-    key = f"g_{chat_id}"
-    now = time.time()
-    last = replied_users.get(key, 0)
-    if now - last < GROUP_REPLY_COOLDOWN:
-        log.debug(f"[group-cooldown] chat={chat_id} skipping (within {GROUP_REPLY_COOLDOWN}s)")
-        return
+    cooldown = int(config.get("group_cooldown", DEFAULT_GROUP_COOLDOWN))
+    if cooldown > 0:
+        key = f"g_{chat_id}_{sender.id}"  # per-user instead of per-chat
+        now = time.time()
+        last = replied_users.get(key, 0)
+        if now - last < cooldown:
+            log.debug(f"[group-cooldown] chat={chat_id} user={sender.id} skipping (within {cooldown}s)")
+            return
+        replied_users[key] = now
 
-    session_id = f"group_{chat_id}"
+    session_id = f"group_{event.chat_id}"
     response_text = await _ai_respond(session_id, event.raw_text or "")
     if not response_text:
         return
 
     try:
         await event.reply(response_text)
-        replied_users[key] = now
         stats["replies_sent"] += 1
-        log.info(f"پاسخ گروه {chat_id} با AI ({reason})")
+        log.info(f"پاسخ گروه {event.chat_id} با AI ({reason})")
     except Exception as e:  # noqa: BLE001
         log.error(f"پاسخ گروه ناموفق: {e}")
 
