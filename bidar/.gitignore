@@ -3,11 +3,18 @@
 *.session
 *.session-journal
 
-# Logs
-*.log
+# Runtime state
+bidar_config.json
+bidar.log
+bidar.out.log
+bidar.err.log
 
 # Python
 __pycache__/
 *.pyc
 venv/
 .venv/
+
+# OS
+.DS_Store
+Thumbs.db

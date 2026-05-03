@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ──────────────── پیکربندی پیش‌فرض ────────────────
-REPO_URL="${BIDAR_REPO:-https://github.com/YOUR_USERNAME/bidar.git}"
+REPO_URL="${BIDAR_REPO:-https://github.com/MamawliV2/bidar.git}"
 INSTALL_DIR="${BIDAR_DIR:-/opt/bidar}"
 SERVICE_NAME="bidar"
 PYTHON_MIN="3.10"
