@@ -1,0 +1,17 @@
+[Unit]
+Description=Bidar - Always Online Telegram Userbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/venv/bin/python __INSTALL_DIR__/bidar.py
+Restart=always
+RestartSec=10
+StandardOutput=append:__INSTALL_DIR__/bidar.out.log
+StandardError=append:__INSTALL_DIR__/bidar.err.log
+User=__SERVICE_USER__
+
+[Install]
+WantedBy=multi-user.target
