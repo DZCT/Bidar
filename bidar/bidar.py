@@ -44,7 +44,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -635,17 +635,49 @@ async def _handle_group_or_channel(event, sender) -> None:
     if not ready:
         return
 
-    # تصمیم: این پیام مربوط به ما هست یا نه؟
+    msg = event.message
+    is_mention = bool(getattr(msg, "mentioned", False))
+    # چک reply از چند مسیر (مطمئن‌ترین راه)
+    reply_to_msg_id = (
+        getattr(msg, "reply_to_msg_id", None)
+        or getattr(getattr(msg, "reply_to", None), "reply_to_msg_id", None)
+    )
+    is_reply = bool(event.is_reply or reply_to_msg_id)
+
     should_respond = False
-    if getattr(event.message, "mentioned", False):
+    reason = ""
+
+    # ۱) mention (شامل @username)
+    if is_mention:
         should_respond = True
-    elif event.is_reply:
+        reason = "mentioned"
+
+    # ۲) reply به پیام مالک اکانت
+    if not should_respond and is_reply:
         try:
             replied = await event.get_reply_message()
-            if replied and replied.sender_id == OWNER_ID:
-                should_respond = True
-        except Exception:  # noqa: BLE001
-            pass
+            if replied:
+                # چک sender_id و از طرف خود کاربر بودن (out)
+                replied_sender = replied.sender_id
+                replied_out = getattr(replied, "out", False)
+                if replied_sender == OWNER_ID or replied_out:
+                    should_respond = True
+                    reason = "reply_to_owner"
+                else:
+                    log.debug(
+                        f"[group-reply] chat={event.chat_id} "
+                        f"replied_sender={replied_sender} owner={OWNER_ID} out={replied_out}"
+                    )
+            else:
+                log.debug(f"[group-reply] chat={event.chat_id} reply object is None")
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"[group-reply] get_reply_message failed: {e}")
+
+    log.info(
+        f"[group-msg] chat={event.chat_id} from={sender.id} "
+        f"mentioned={is_mention} is_reply={is_reply} "
+        f"decision={'REPLY' if should_respond else 'SKIP'}({reason})"
+    )
 
     if not should_respond:
         return
@@ -656,6 +688,7 @@ async def _handle_group_or_channel(event, sender) -> None:
     now = time.time()
     last = replied_users.get(key, 0)
     if now - last < GROUP_REPLY_COOLDOWN:
+        log.debug(f"[group-cooldown] chat={chat_id} skipping (within {GROUP_REPLY_COOLDOWN}s)")
         return
 
     session_id = f"group_{chat_id}"
@@ -667,7 +700,7 @@ async def _handle_group_or_channel(event, sender) -> None:
         await event.reply(response_text)
         replied_users[key] = now
         stats["replies_sent"] += 1
-        log.info(f"پاسخ گروه {chat_id} با AI")
+        log.info(f"پاسخ گروه {chat_id} با AI ({reason})")
     except Exception as e:  # noqa: BLE001
         log.error(f"پاسخ گروه ناموفق: {e}")
 
