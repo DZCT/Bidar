@@ -1,74 +1,76 @@
-# PRD — Bidar v1.1.0 (Always Online Telegram Userbot)
+# PRD — Bidar v1.2.0 (Always Online Telegram Userbot)
 
 ## Problem Statement
 کاربر میخواد اکانت تلگرامش همیشه آنلاین باشه و پاسخ خودکار بده،
-کنترلش فقط دست خودش باشه، و دستورات نصب/مدیریت رو ساده و اتوماتیک کنه.
+کنترلش فقط دست خودش باشه، و همه تنظیمات حیاتی قابل تغییر از داخل چت باشن.
 
-## User Choices
-- نام پروژه: **Bidar** (بیدار)
+## User Context
 - یوزرنیم گیت‌هاب: `MamawliV2`
-- کتابخونه: Telethon
 - محل اجرا: VPS (لینوکس)
+- کتابخونه: Telethon
 
-## v1.1.0 Updates (this iteration)
-- ✅ **آنلاین واقعی**: تسک پس‌زمینه `online_keeper()` که هر ۴ دقیقه
-     `UpdateStatusRequest(offline=False)` میفرسته — الان واقعاً به دیگران
-     آنلاین نشون داده میشه
-- ✅ **دستور `.online on|off`** برای کنترل وضعیت آنلاین
-- ✅ **دستور `.reply on|off`** جدا از AFK برای پاسخ خودکار
-- ✅ **دستور `.setmsg <متن>`** برای ویرایش متن پاسخ خودکار در زمان اجرا
-- ✅ **تنظیمات پایدار** در `bidar_config.json` (بعد از ری‌استارت حفظ میشه)
-- ✅ **Aliasهای فارسی** برای on/off (روشن/خاموش)
-- ✅ یوزرنیم گیت‌هاب در install.sh و README به `MamawliV2` آپدیت شد
+## v1.2.0 Updates (this iteration)
+- ✅ دستور `.interval <ثانیه>` برای تنظیم بازه رفرش آنلاین
+- ✅ پشتیبانی از فرمت دقیقه: `.interval 3m`
+- ✅ محدوده مجاز: 30-300 ثانیه (با پیام خطای هوشمند)
+- ✅ پیش‌فرض: 240s (۴ دقیقه)
+- ✅ ذخیره پایدار در `bidar_config.json`
+- ✅ `.stats` حالا بازه رفرش رو هم نشون میده
+- ✅ `.help` آپدیت شد
 
-## All Commands (9 total, همه owner-only)
-| دستور | کاربرد |
-|---|---|
-| `.online on/off` | آنلاین دائم |
-| `.reply on/off` | پاسخ خودکار |
-| `.setmsg <متن>` | ویرایش متن |
-| `.afk [متن]` | میانبر AFK |
-| `.ping` | تست تاخیر |
-| `.alive` | زنده بودن |
-| `.stats` | همه آمار + تنظیمات |
-| `.id` | آیدی |
-| `.restart` | ری‌استارت |
-| `.help`/.menu/.commands | راهنما |
+## All Commands (10 total, همه owner-only)
+| گروه | دستور | کاربرد |
+|---|---|---|
+| آنلاین | `.online on/off/toggle` | کنترل آنلاین |
+| آنلاین | `.interval <s>` | تنظیم بازه رفرش |
+| پاسخ | `.reply on/off/toggle` | پاسخ خودکار |
+| پاسخ | `.setmsg <متن>` | ویرایش متن |
+| پاسخ | `.afk [متن]` | میانبر |
+| ابزار | `.ping`, `.alive`, `.stats`, `.id` | اطلاعات |
+| مدیریت | `.restart`, `.help` | سیستم |
+
+## Config Schema (bidar_config.json)
+```json
+{
+  "online_enabled": true,
+  "autoreply_enabled": false,
+  "autoreply_message": "...",
+  "autoreply_cooldown": 1800,
+  "online_refresh_interval": 240
+}
+```
 
 ## Security
 - Double-layer owner check: `outgoing=True` + `sender_id == OWNER_ID`
-- Decorator `@owner_only` روی همه هندلرها (تست شد: هیچ handler بدون این دکوریتور نیست)
+- `@owner_only` decorator on all 10 handlers (verified)
 - `.env` با permission 600
-- `.gitignore` شامل همه فایل‌های حساس
+- `.gitignore` شامل `bidar_config.json`, `.env`, `*.session`
+
+## Tests Passed
+- Python lint (ruff): all checks passed
+- Regex pattern tests for `.interval` (4 variants)
+- Config persistence (save/load roundtrip)
+- All 10 commands have `@owner_only`
 
 ## File Structure
 ```
 /app/bidar/
-├── bidar.py              # 404 lines — logic
-├── install.sh            # 321 lines — one-line installer
+├── bidar.py              # 457 lines
+├── install.sh            # 321 lines
 ├── bidar.service         # systemd template
-├── requirements.txt      # Telethon + python-dotenv
-├── bidar_config.json     # runtime state (gitignored)
+├── requirements.txt
 ├── .env.example
 ├── .gitignore
-└── README.md             # 216 lines
+└── README.md             # 219 lines
 ```
 
-## Tests Passed
-- Python lint (ruff): all checks passed
-- Bash syntax check (bash -n): OK
-- Module imports without errors
-- Unit tests for `_fmt_uptime`, `_is_owner`, `_parse_on_off`
-- JSON config persistence (save/load roundtrip)
-- All 9 command handlers have `@owner_only`
-
 ## Next Action Items
-- کاربر از Save to GitHub برای انتقال به `github.com/MamawliV2/bidar` استفاده کنه
-- تست روی VPS واقعی با API credentials کاربر
+- Save to GitHub → `github.com/MamawliV2/bidar`
+- تست روی VPS واقعی
 
 ## Backlog (Future)
+- P1: Night mode (AFK خودکار شبانه)
 - P1: AI auto-reply با GPT
-- P1: Night mode (AFK خودکار در ساعات خاص)
-- P2: Whitelist/Blacklist برای پاسخ خودکار
+- P2: Whitelist/Blacklist
 - P2: Scheduled messages
-- P2: Web dashboard برای چند اکانت
+- P2: Web dashboard

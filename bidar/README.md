@@ -8,7 +8,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?logo=telegram&logoColor=white)
-![Version](https://img.shields.io/badge/Version-1.1.0-success)
+![Version](https://img.shields.io/badge/Version-1.2.0-success)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 </div>
@@ -83,6 +83,9 @@ bash install.sh
 | `.online on` | روشن کردن آنلاین دائم |
 | `.online off` | خاموش کردن (آفلاین نشون داده میشی) |
 | `.online` | جابه‌جا (toggle) |
+| `.interval <ثانیه>` | تنظیم بازه رفرش (پیش‌فرض ۲۴۰ = ۴ دقیقه) |
+| `.interval 3m` | پشتیبانی از دقیقه (m) هم |
+| `.interval` | نمایش مقدار فعلی و محدوده مجاز |
 
 ### 🔹 پاسخ خودکار
 | دستور | کاربرد |

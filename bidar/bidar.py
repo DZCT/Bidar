@@ -33,14 +33,16 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 DEFAULT_AUTOREPLY = os.environ.get(
     "AFK_MESSAGE",
     "سلام 👋 الان در دسترس نیستم، پیامت رو دیدم و به زودی پاسخ میدم 🙏",
 )
 DEFAULT_COOLDOWN = int(os.environ.get("AFK_COOLDOWN", "1800"))
-ONLINE_REFRESH_INTERVAL = 240  # ثانیه — تلگرام هر ~۵ دقیقه آفلاینت میکنه
+DEFAULT_ONLINE_INTERVAL = 240  # ثانیه — پیش‌فرض ۴ دقیقه
+MIN_ONLINE_INTERVAL = 30       # پایین‌تر از این فشار بی‌مورد به سرور میاد
+MAX_ONLINE_INTERVAL = 300      # بالاتر از این، تلگرام وسطش آفلاینت میکنه
 
 # ───────────────────────── تنظیمات پایدار (JSON) ─────────────────────────
 CONFIG_FILE = BASE_DIR / "bidar_config.json"
@@ -50,6 +52,7 @@ _DEFAULT_CONFIG = {
     "autoreply_enabled": False,
     "autoreply_message": DEFAULT_AUTOREPLY,
     "autoreply_cooldown": DEFAULT_COOLDOWN,
+    "online_refresh_interval": DEFAULT_ONLINE_INTERVAL,
 }
 
 config: dict = dict(_DEFAULT_CONFIG)
@@ -142,8 +145,9 @@ def _parse_on_off(arg: str | None, current: bool) -> bool:
 # ─────────────────────── تسک پس‌زمینه: آنلاین نگه دار ─────────────────────
 async def online_keeper() -> None:
     """
-    هر ONLINE_REFRESH_INTERVAL ثانیه یه بار وضعیت آنلاین رو رفرش میکنه.
+    هر `online_refresh_interval` ثانیه یه بار وضعیت آنلاین رو رفرش میکنه.
     بدون این، بعد از ~۵ دقیقه از نظر دیگران آفلاین نشون داده میشی.
+    مقدار از config خوانده میشه، پس تغییراتش در چرخه بعدی اعمال میشه.
     """
     await asyncio.sleep(3)
     last_sent_offline: bool | None = None
@@ -160,7 +164,10 @@ async def online_keeper() -> None:
                     log.debug("🟢 وضعیت آنلاین رفرش شد")
         except Exception as e:  # noqa: BLE001
             log.error(f"online_keeper: {e}")
-        await asyncio.sleep(ONLINE_REFRESH_INTERVAL)
+        # بازه رفرش از config (قابل تغییر با .interval)
+        interval = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
+        interval = max(MIN_ONLINE_INTERVAL, min(MAX_ONLINE_INTERVAL, interval))
+        await asyncio.sleep(interval)
 
 
 # ─────────────────────── دستورات یوزربات ─────────────────────
@@ -250,14 +257,58 @@ async def cmd_afk(event):
     )
 
 
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}interval(?:\s+(\d+)([smSM]?))?$"))
+@owner_only
+async def cmd_interval(event):
+    """تنظیم بازه رفرش آنلاین (پیش‌فرض ۲۴۰ ثانیه = ۴ دقیقه)."""
+    num = event.pattern_match.group(1)
+    unit = (event.pattern_match.group(2) or "s").lower()
+
+    if num is None:
+        current = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
+        await event.edit(
+            "⏱ **بازه رفرش آنلاین**\n\n"
+            f"📊 مقدار فعلی: `{current}s` (~{current // 60}m {current % 60}s)\n"
+            f"🔢 محدوده مجاز: `{MIN_ONLINE_INTERVAL}` تا `{MAX_ONLINE_INTERVAL}` ثانیه\n\n"
+            f"🛠 برای تغییر:\n"
+            f"  `{CMD_PREFIX}interval 180`  → ۱۸۰ ثانیه\n"
+            f"  `{CMD_PREFIX}interval 3m`   → ۳ دقیقه (۱۸۰ ثانیه)\n"
+            f"  `{CMD_PREFIX}interval 240`  → پیش‌فرض (۴ دقیقه)"
+        )
+        return
+
+    value = int(num)
+    if unit == "m":
+        value *= 60
+
+    if value < MIN_ONLINE_INTERVAL or value > MAX_ONLINE_INTERVAL:
+        await event.edit(
+            "⚠️ **مقدار خارج از محدوده‌ست.**\n\n"
+            f"🔢 محدوده مجاز: `{MIN_ONLINE_INTERVAL}s` تا `{MAX_ONLINE_INTERVAL}s`\n"
+            f"🔽 پایین‌تر از `{MIN_ONLINE_INTERVAL}s`: فشار بی‌مورد به سرور تلگرام\n"
+            f"🔼 بالاتر از `{MAX_ONLINE_INTERVAL}s`: وسط رفرش‌ها آفلاین میشی"
+        )
+        return
+
+    config["online_refresh_interval"] = value
+    save_config()
+    await event.edit(
+        "✅ **بازه رفرش آپدیت شد**\n\n"
+        f"⏱ مقدار جدید: `{value}s` (~{value // 60}m {value % 60}s)\n"
+        f"ℹ️ تغییر در چرخه بعدی رفرش اعمال میشه."
+    )
+
+
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}stats$"))
 @owner_only
 async def cmd_stats(event):
     uptime = time.time() - stats["start_time"]
+    interval = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
     text = (
         "📊 **آمار و تنظیمات Bidar**\n\n"
         f"⏱ آپ‌تایم: `{_fmt_uptime(uptime)}`\n"
         f"📡 آنلاین دائم: `{'روشن 🟢' if config['online_enabled'] else 'خاموش 🔴'}`\n"
+        f"🔄 بازه رفرش آنلاین: `{interval}s` (~{interval // 60}m)\n"
         f"🤖 پاسخ خودکار: `{'روشن 🟢' if config['autoreply_enabled'] else 'خاموش 🔴'}`\n"
         f"📨 پیام‌های خصوصی دریافتی: `{stats['messages_received']}`\n"
         f"✉️ پاسخ‌های خودکار ارسالی: `{stats['replies_sent']}`\n"
@@ -311,7 +362,9 @@ async def cmd_help(event):
         f"  `{CMD_PREFIX}online on` — آنلاین دائم روشن\n"
         f"  `{CMD_PREFIX}online off` — خاموش (آفلاین نشون داده میشی)\n"
         f"  `{CMD_PREFIX}online` — جابه‌جا (toggle)\n"
-        "  ℹ️ با روشن بودن این، هر ۴ دقیقه وضعیتت رفرش میشه\n"
+        f"  `{CMD_PREFIX}interval <ثانیه>` — تنظیم بازه رفرش (پیش‌فرض ۲۴۰=۴m)\n"
+        f"  `{CMD_PREFIX}interval` — نمایش مقدار فعلی\n"
+        "  ℹ️ با روشن بودن آنلاین، هر چند دقیقه وضعیتت رفرش میشه\n"
         "     تا همیشه برای بقیه «آنلاین» نشون بدی.\n\n"
         "🔹 **پاسخ خودکار**\n"
         f"  `{CMD_PREFIX}reply on` — پاسخ خودکار روشن\n"
