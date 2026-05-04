@@ -16,9 +16,12 @@ Bidar — یوزربات تلگرام همیشه آنلاین با دستیار 
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 import logging
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -44,7 +47,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -84,6 +87,10 @@ _DEFAULT_CONFIG = {
     "ai_personality": DEFAULT_AI_PERSONALITY,
     "ai_groups_enabled": False,
     "group_cooldown": DEFAULT_GROUP_COOLDOWN,
+    # Translation
+    "translate_target": "fa",  # زبان پیش‌فرض ترجمه
+    # Image generation
+    "image_model": "gemini-3.1-flash-image-preview",
 }
 
 config: dict = dict(_DEFAULT_CONFIG)
@@ -230,6 +237,58 @@ async def _ai_respond(session_id: str, user_text: str) -> str | None:
         return str(resp).strip()
     except Exception as e:  # noqa: BLE001
         log.error(f"AI error on {session_id}: {e}")
+        return None
+
+
+# ─────────── ترجمه و تولید تصویر (یکبار-مصرف، بدون حافظه) ───────────
+async def _translate_text(text: str, target_lang: str) -> str | None:
+    """ترجمه یک‌متنی بدون حافظه (هر بار session جدید)."""
+    ready, _ = _ai_ready()
+    if not ready or not text.strip():
+        return None
+    system_msg = (
+        f"You are a professional translator. Translate the user's input to '{target_lang}'. "
+        "Output ONLY the translated text — no explanations, no quotes, no language labels, "
+        "no extra context. Preserve formatting, emojis, links, and punctuation. "
+        "If the source is already in the target language, refine it slightly. "
+        "If the input contains commands or technical terms, keep them intact."
+    )
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"translate-{time.time_ns()}",
+            system_message=system_msg,
+        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
+        resp = await chat.send_message(UserMessage(text=text))
+        return str(resp).strip()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Translate error: {e}")
+        return None
+
+
+async def _generate_image(prompt: str) -> bytes | None:
+    """تولید تصویر از prompt متنی. خروجی: bytes تصویر یا None در صورت خطا."""
+    ready, _ = _ai_ready()
+    if not ready or not prompt.strip():
+        return None
+    model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
+    try:
+        chat = (
+            LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"image-{time.time_ns()}",
+                system_message="You are an expert image generator. Create high-quality, detailed images based on the user's prompt.",
+            )
+            .with_model("gemini", model_name)
+            .with_params(modalities=["image", "text"])
+        )
+        _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt))
+        if not images:
+            log.warning("Image gen: no images returned")
+            return None
+        return base64.b64decode(images[0]["data"])
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Image gen error: {e}")
         return None
 
 
@@ -505,6 +564,155 @@ async def cmd_aireset(event):
     await event.edit(f"🔄 **حافظه AI ریست شد.** `{count}` session پاک شد.")
 
 
+# ═════════ دستورات ترجمه ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}lang(?:\s+([a-zA-Z\-]+))?$"))
+@owner_only
+async def cmd_lang(event):
+    """تنظیم زبان پیش‌فرض ترجمه."""
+    arg = event.pattern_match.group(1)
+    if arg is None:
+        current = config.get("translate_target", "fa")
+        await event.edit(
+            f"🌐 **زبان پیش‌فرض ترجمه:** `{current}`\n\n"
+            f"🛠 برای تغییر:\n"
+            f"  `{CMD_PREFIX}lang fa` — فارسی\n"
+            f"  `{CMD_PREFIX}lang en` — انگلیسی\n"
+            f"  `{CMD_PREFIX}lang ar` — عربی\n"
+            f"  `{CMD_PREFIX}lang fr` — فرانسوی\n"
+            f"  `{CMD_PREFIX}lang de`, `es`, `tr`, `ru`, `zh` و ...\n\n"
+            f"این زبان برای دستور `{CMD_PREFIX}tl` استفاده میشه."
+        )
+        return
+    config["translate_target"] = arg.lower()
+    save_config()
+    await event.edit(f"✅ زبان پیش‌فرض ترجمه به `{arg.lower()}` تنظیم شد.")
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}tl(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_translate(event):
+    """ترجمه به زبان پیش‌فرض. اگه ریپلای باشه، پیام ریپلای شده ترجمه میشه."""
+    target = config.get("translate_target", "fa")
+    text_arg = event.pattern_match.group(1)
+
+    if text_arg:
+        source_text = text_arg.strip()
+    elif event.is_reply:
+        try:
+            replied = await event.get_reply_message()
+            if replied and (replied.raw_text or replied.text):
+                source_text = replied.raw_text or replied.text or ""
+            else:
+                await event.edit("❌ پیام ریپلای شده متن نداره.")
+                return
+        except Exception as e:  # noqa: BLE001
+            await event.edit(f"❌ خطا در دریافت پیام ریپلای: {e}")
+            return
+    else:
+        await event.edit(
+            f"🌐 **استفاده از ترجمه:**\n\n"
+            f"  `{CMD_PREFIX}tl <متن>` — ترجمه متن\n"
+            f"  ریپلای + `{CMD_PREFIX}tl` — ترجمه پیام ریپلای شده\n"
+            f"  `{CMD_PREFIX}lang <code>` — تغییر زبان مقصد\n\n"
+            f"🎯 زبان فعلی: `{target}`"
+        )
+        return
+
+    msg = await event.edit("🌐 در حال ترجمه...")
+    translated = await _translate_text(source_text, target)
+    if translated:
+        await msg.edit(f"🌐 **ترجمه ({target}):**\n\n{translated}")
+    else:
+        await msg.edit("❌ ترجمه ناموفق بود. AI رو چک کن.")
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}to\s+([a-zA-Z\-]+)\s+([\s\S]+)$"))
+@owner_only
+async def cmd_to(event):
+    """متن رو به زبان مشخص ترجمه می‌کنه و پیام رو edit می‌کنه (نه reply)."""
+    target = event.pattern_match.group(1).lower()
+    text = event.pattern_match.group(2).strip()
+
+    msg = await event.edit("✏️ در حال ترجمه...")
+    translated = await _translate_text(text, target)
+    if translated:
+        # فقط متن ترجمه‌شده رو نشون بده، بدون توضیح اضافی
+        await msg.edit(translated)
+    else:
+        await msg.edit(f"{text}\n\n❌ ترجمه ناموفق بود.")
+
+
+# ═════════ دستور تولید تصویر ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}img(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_image(event):
+    """تولید تصویر با Gemini Nano Banana."""
+    prompt = event.pattern_match.group(1)
+    if not prompt or not prompt.strip():
+        await event.edit(
+            f"🎨 **تولید تصویر**\n\n"
+            f"  `{CMD_PREFIX}img <توضیح تصویر>`\n\n"
+            f"📝 مثال:\n"
+            f"  `{CMD_PREFIX}img a fluffy cat astronaut on Mars`\n"
+            f"  `{CMD_PREFIX}img نقاشی مینیمال از کوه‌های دماوند هنگام غروب`\n\n"
+            f"🎯 مدل فعلی: `{config.get('image_model', 'gemini-3.1-flash-image-preview')}`"
+        )
+        return
+
+    prompt = prompt.strip()
+    msg = await event.edit(f"🎨 در حال تولید تصویر...\n_{prompt[:100]}_")
+
+    img_bytes = await _generate_image(prompt)
+    if not img_bytes:
+        await msg.edit(
+            "❌ تولید تصویر ناموفق بود.\n"
+            "بررسی کن: AI روشن باشه، EMERGENT_LLM_KEY ست شده باشه، prompt مناسب باشه."
+        )
+        return
+
+    # ذخیره موقت در فایل و ارسال
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(img_bytes)
+            tmp = f.name
+
+        await client.send_file(
+            event.chat_id,
+            tmp,
+            caption=f"🎨 {prompt[:1000]}",
+            reply_to=event.reply_to_msg_id,
+        )
+        await msg.delete()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Send image: {e}")
+        await msg.edit(f"❌ ارسال تصویر ناموفق: {e}")
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}imgmodel(?:\s+(\S+))?$"))
+@owner_only
+async def cmd_imgmodel(event):
+    """تغییر مدل تولید تصویر."""
+    arg = event.pattern_match.group(1)
+    if arg is None:
+        await event.edit(
+            f"🎨 **مدل تولید تصویر:** `{config.get('image_model', 'gemini-3.1-flash-image-preview')}`\n\n"
+            "🌟 مدل‌های موجود:\n"
+            f"  `{CMD_PREFIX}imgmodel gemini-3.1-flash-image-preview` ⚡ (پیش‌فرض، Nano Banana)\n"
+            f"  `{CMD_PREFIX}imgmodel gemini-3-pro-image-preview` 🔥 (Pro، کیفیت بالاتر)"
+        )
+        return
+    config["image_model"] = arg
+    save_config()
+    await event.edit(f"✅ مدل تولید تصویر به `{arg}` تنظیم شد.")
+
+
 # ═════════ دستورات اطلاعاتی ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}stats$"))
 @owner_only
@@ -591,6 +799,15 @@ async def cmd_help(event):
         f"  `{CMD_PREFIX}aimodel <مدل>` — تغییر مدل\n"
         f"  `{CMD_PREFIX}groupcd <s>` — cooldown گروه (۰=بدون محدودیت)\n"
         f"  `{CMD_PREFIX}aireset` — پاک کردن حافظه مکالمات\n\n"
+        "🌐 **ترجمه**\n"
+        f"  `{CMD_PREFIX}lang <code>` — تنظیم زبان پیش‌فرض (fa, en, ar, ...)\n"
+        f"  `{CMD_PREFIX}tl <متن>` — ترجمه به زبان پیش‌فرض\n"
+        f"  ریپلای + `{CMD_PREFIX}tl` — ترجمه پیام ریپلای شده\n"
+        f"  `{CMD_PREFIX}to <code> <متن>` — متن رو ادیت می‌کنه به زبان دیگه\n"
+        f"     مثال: `{CMD_PREFIX}to en سلام چطوری`\n\n"
+        "🎨 **تولید تصویر**\n"
+        f"  `{CMD_PREFIX}img <توضیح>` — تولید تصویر با Nano Banana\n"
+        f"  `{CMD_PREFIX}imgmodel <model>` — تغییر مدل تصویر\n\n"
         "📊 **اطلاعات**\n"
         f"  `{CMD_PREFIX}alive` — زنده بودن\n"
         f"  `{CMD_PREFIX}ping` — تست تاخیر\n"
