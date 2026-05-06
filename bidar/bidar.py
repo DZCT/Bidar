@@ -48,7 +48,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -596,6 +596,114 @@ async def cmd_aireset(event):
     await event.edit(f"🔄 **حافظه AI ریست شد.** `{count}` session پاک شد.")
 
 
+# ═════════ دستور تولید پاسخ دستی با AI ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}r(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_generate_reply(event):
+    """
+    AI بر اساس ۱۰ پیام اخیر این چت، یه پاسخ طبیعی می‌سازه
+    و پیام دستور رو به همون پاسخ edit می‌کنه.
+
+    استفاده:
+      .r           → پاسخ بر اساس context
+      .r <hint>    → پاسخ با راهنمایی (مثلاً "کوتاه و مودب" یا "شوخ")
+      reply + .r   → اولویت با پیام ریپلای شده
+    """
+    ready, err = _ai_ready()
+    if not ready:
+        await event.edit(f"❌ AI آماده نیست: {err}")
+        return
+
+    hint = event.pattern_match.group(1)
+    await event.edit("🤔 ...")
+
+    # ───── جمع‌آوری context از چت فعلی ─────
+    context_lines: list[str] = []
+    try:
+        # iter_messages به ترتیب نزولی (جدید → قدیم)
+        async for msg in client.iter_messages(event.chat_id, limit=20):
+            if msg.id == event.id:
+                continue  # رد پیام دستور خود .r
+            text = (msg.raw_text or msg.text or "").strip()
+            if not text:
+                continue
+            if text.startswith(CMD_PREFIX):
+                continue  # رد دستورات
+            # نام فرستنده
+            if msg.sender_id == OWNER_ID:
+                name = "You"
+            else:
+                try:
+                    sender = await msg.get_sender()
+                    name = getattr(sender, "first_name", None) or "User"
+                except Exception:  # noqa: BLE001
+                    name = "User"
+            context_lines.append(f"{name}: {text[:400]}")
+            if len(context_lines) >= 10:
+                break
+        context_lines.reverse()  # قدیم → جدید
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"cmd_r: failed to fetch context: {e}")
+
+    # ───── پیام هدف (اگه ریپلای باشه) ─────
+    target_text: str | None = None
+    if event.is_reply:
+        try:
+            replied = await event.get_reply_message()
+            if replied:
+                t = (replied.raw_text or replied.text or "").strip()
+                if t:
+                    target_text = t[:500]
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ───── ساخت prompt ─────
+    context_str = "\n".join(context_lines) if context_lines else "(no recent context)"
+    chat_type = "private chat" if event.is_private else "group chat"
+
+    system_msg = (
+        "You are replying as 'You' in a real Telegram conversation. "
+        f"This is a {chat_type}. "
+        "Generate a natural, contextually-appropriate message that 'You' would send right now. "
+        "Match the tone, style, and language of the conversation (if it's Persian, reply in Persian; "
+        "if English, reply in English; etc). "
+        "Keep it short and natural — like how a real person texts. "
+        "Do NOT introduce yourself as AI, bot, or assistant. "
+        "Output ONLY the message text — no quotes, no labels, no explanations."
+    )
+
+    parts = [f"Recent conversation:\n{context_str}"]
+    if target_text:
+        parts.append(f"\n(The focus is this specific message you should address:)\n{target_text}")
+    if hint:
+        parts.append(f"\n(Additional instruction for your reply: {hint})")
+    parts.append("\nNow write the reply message:")
+    user_prompt = "\n".join(parts)
+
+    # ───── فراخوانی AI ─────
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"genreply-{time.time_ns()}",
+            system_message=system_msg,
+        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
+        resp = await chat.send_message(UserMessage(text=user_prompt))
+        reply_text = str(resp).strip()
+        # حذف کوتیشن‌های اضافی که بعضی مدل‌ها اضافه می‌کنن
+        if (reply_text.startswith('"') and reply_text.endswith('"')) or \
+           (reply_text.startswith("«") and reply_text.endswith("»")):
+            reply_text = reply_text[1:-1].strip()
+        if not reply_text:
+            await event.edit("❌ AI پاسخی تولید نکرد. دوباره امتحان کن.")
+            return
+        stats["ai_replies"] += 1
+        await event.edit(reply_text)
+        log.info(f"[.r] generated in chat={event.chat_id} len={len(reply_text)}")
+    except Exception as e:  # noqa: BLE001
+        log.error(f"cmd_r error: {e}")
+        await event.edit(f"❌ خطا در تولید پاسخ: {e}")
+
+
 # ═════════ دستورات ترجمه ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}lang(?:\s+([a-zA-Z\-]+))?$"))
 @owner_only
@@ -911,7 +1019,8 @@ async def cmd_help(event):
         f"  `{CMD_PREFIX}personality reset` — ریست به پیش‌فرض\n"
         f"  `{CMD_PREFIX}aimodel <مدل>` — تغییر مدل\n"
         f"  `{CMD_PREFIX}groupcd <s>` — cooldown گروه (۰=بدون محدودیت)\n"
-        f"  `{CMD_PREFIX}aireset` — پاک کردن حافظه مکالمات\n\n"
+        f"  `{CMD_PREFIX}aireset` — پاک کردن حافظه مکالمات\n"
+        f"  `{CMD_PREFIX}r [hint]` — **تولید پاسخ دستی** با AI بر اساس چت فعلی\n\n"
         "🌐 **ترجمه**\n"
         f"  `{CMD_PREFIX}lang <code>` — تنظیم زبان پیش‌فرض (fa, en, ar, ...)\n"
         f"  `{CMD_PREFIX}tl <متن>` — ترجمه به زبان پیش‌فرض\n"
