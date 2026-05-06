@@ -31,12 +31,13 @@ from telethon.tl.functions.account import UpdateStatusRequest
 
 # Optional: AI integration via Emergent Universal Key
 try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage  # type: ignore
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent  # type: ignore
     AI_LIB_OK = True
 except ImportError:  # کتابخونه نصب نباشه، AI غیرفعال میشه
     AI_LIB_OK = False
     LlmChat = None  # type: ignore
     UserMessage = None  # type: ignore
+    ImageContent = None  # type: ignore
 
 # ───────────────────────── پیکربندی پایه (.env) ─────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,7 +48,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -289,6 +290,37 @@ async def _generate_image(prompt: str) -> bytes | None:
         return base64.b64decode(images[0]["data"])
     except Exception as e:  # noqa: BLE001
         log.error(f"Image gen error: {e}")
+        return None
+
+
+async def _edit_image(image_bytes: bytes, edit_prompt: str) -> bytes | None:
+    """ویرایش تصویر موجود با prompt. خروجی: bytes تصویر ویرایش‌شده یا None."""
+    ready, _ = _ai_ready()
+    if not ready or not edit_prompt.strip() or not image_bytes:
+        return None
+    model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
+    try:
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        chat = (
+            LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"imgedit-{time.time_ns()}",
+                system_message="You are an expert image editor. Edit the given reference image based on the user's instructions while preserving the main subject's identity unless told otherwise.",
+            )
+            .with_model("gemini", model_name)
+            .with_params(modalities=["image", "text"])
+        )
+        msg = UserMessage(
+            text=edit_prompt,
+            file_contents=[ImageContent(image_b64)],
+        )
+        _text, images = await chat.send_message_multimodal_response(msg)
+        if not images:
+            log.warning("Image edit: no images returned")
+            return None
+        return base64.b64decode(images[0]["data"])
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Image edit error: {e}")
         return None
 
 
@@ -713,6 +745,87 @@ async def cmd_imgmodel(event):
     await event.edit(f"✅ مدل تولید تصویر به `{arg}` تنظیم شد.")
 
 
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}imgedit(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_imgedit(event):
+    """ویرایش تصویر با AI. باید روی یه پیام عکس‌دار ریپلای بزنی."""
+    prompt = event.pattern_match.group(1)
+    if not prompt or not prompt.strip():
+        await event.edit(
+            f"🖼 **ویرایش تصویر**\n\n"
+            f"🔧 طرز استفاده:\n"
+            f"۱. روی یه پیام **عکس‌دار** ریپلای بزن\n"
+            f"۲. تایپ کن: `{CMD_PREFIX}imgedit <توضیح تغییر>`\n\n"
+            f"📝 مثال:\n"
+            f"  `{CMD_PREFIX}imgedit پس‌زمینه رو شب پر ستاره بزن`\n"
+            f"  `{CMD_PREFIX}imgedit کلاه قرمز روی سرش بذار`\n"
+            f"  `{CMD_PREFIX}imgedit make it black and white vintage style`\n"
+            f"  `{CMD_PREFIX}imgedit add a rainbow in the sky`"
+        )
+        return
+
+    if not event.is_reply:
+        await event.edit("❌ باید روی یه پیام **عکس‌دار** ریپلای بزنی.")
+        return
+
+    prompt = prompt.strip()
+    msg = await event.edit(f"🖼 در حال ویرایش تصویر...\n_{prompt[:100]}_")
+
+    try:
+        replied = await event.get_reply_message()
+    except Exception as e:  # noqa: BLE001
+        await msg.edit(f"❌ خطا در دریافت پیام ریپلای: {e}")
+        return
+
+    if not replied or not replied.media:
+        await msg.edit("❌ پیام ریپلای شده عکس نداره.")
+        return
+
+    # دانلود تصویر از تلگرام به صورت bytes
+    try:
+        img_bytes = await client.download_media(replied, file=bytes)
+    except Exception as e:  # noqa: BLE001
+        await msg.edit(f"❌ خطا در دانلود تصویر: {e}")
+        return
+
+    if not img_bytes or not isinstance(img_bytes, bytes):
+        await msg.edit("❌ تصویر معتبر دریافت نشد.")
+        return
+
+    # ویرایش با AI
+    edited_bytes = await _edit_image(img_bytes, prompt)
+    if not edited_bytes:
+        await msg.edit(
+            "❌ ویرایش تصویر ناموفق بود.\n"
+            "احتمالاً مدل نتونسته prompt رو پیاده کنه — متن ساده‌تر امتحان کن."
+        )
+        return
+
+    # ذخیره موقت و ارسال
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(edited_bytes)
+            tmp = f.name
+
+        await client.send_file(
+            event.chat_id,
+            tmp,
+            caption=f"🖼 **ویرایش‌شده:** {prompt[:900]}",
+            reply_to=replied.id,
+        )
+        await msg.delete()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Send edited image: {e}")
+        await msg.edit(f"❌ ارسال تصویر ویرایش‌شده ناموفق: {e}")
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
 # ═════════ دستورات اطلاعاتی ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}stats$"))
 @owner_only
@@ -807,6 +920,7 @@ async def cmd_help(event):
         f"     مثال: `{CMD_PREFIX}to en سلام چطوری`\n\n"
         "🎨 **تولید تصویر**\n"
         f"  `{CMD_PREFIX}img <توضیح>` — تولید تصویر با Nano Banana\n"
+        f"  `{CMD_PREFIX}imgedit <توضیح>` — ویرایش عکس (روی عکس reply بزن)\n"
         f"  `{CMD_PREFIX}imgmodel <model>` — تغییر مدل تصویر\n\n"
         "📊 **اطلاعات**\n"
         f"  `{CMD_PREFIX}alive` — زنده بودن\n"
