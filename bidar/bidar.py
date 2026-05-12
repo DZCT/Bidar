@@ -334,16 +334,20 @@ I18N = {
 
     # Search
     "search_usage": {
-        "en": "🔍 **Global Search**\n\n  `{p}search <query>` — search all chats (private + groups + channels)\n  `{p}searchall <query>` — include restricted/blocked channels too\n\n📝 Example:\n  `{p}search ali`\n  `{p}search 'meeting tomorrow'`\n\nResults are saved to a `.txt` file with chat names.",
-        "fa": "🔍 **جستجوی جهانی در اکانت**\n\n  `{p}search <متن>` — جستجو در همه چت‌ها (خصوصی + گروه + کانال)\n  `{p}searchall <متن>` — همراه با کانال‌های مسدود/محدود\n\n📝 مثال:\n  `{p}search علی`\n  `{p}search 'جلسه فردا'`\n\nنتایج توی فایل `.txt` با مشخصات چت ذخیره میشن.",
+        "en": "🔍 **Global Search**\n\n  `{p}search <query>` — search **normal** chats (private + groups + channels)\n  `{p}searchall <query>` — search **only restricted/blocked** chats\n\n📝 Example:\n  `{p}search ali`\n  `{p}search 'meeting tomorrow'`\n\nResults are saved to a `.txt` file with chat names.",
+        "fa": "🔍 **جستجوی جهانی در اکانت**\n\n  `{p}search <متن>` — جستجو در چت‌های **عادی** (خصوصی + گروه + کانال)\n  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های **مسدود/محدود**\n\n📝 مثال:\n  `{p}search علی`\n  `{p}search 'جلسه فردا'`\n\nنتایج توی فایل `.txt` با مشخصات چت ذخیره میشن.",
     },
     "search_too_short": {
         "en": "⚠️ Search query must be at least 3 characters.",
         "fa": "⚠️ متن جستجو باید حداقل ۳ کاراکتر باشه.",
     },
     "search_starting": {
-        "en": "🔍 Searching `{q}` across all your chats...\n_This may take a while depending on number of chats._",
-        "fa": "🔍 در حال جستجوی `{q}` در همه چت‌هات...\n_بسته به تعداد چت‌ها ممکنه طول بکشه._",
+        "en": "🔍 Searching `{q}` across all your chats...\n_This may take a while depending on number of chats. Progress updates every 500 chats._",
+        "fa": "🔍 در حال جستجوی `{q}` در همه چت‌هات...\n_بسته به تعداد چت‌ها ممکنه طول بکشه. آپدیت پیشرفت هر ۵۰۰ چت._",
+    },
+    "search_starting_restricted": {
+        "en": "🔒 Searching `{q}` in restricted/blocked channels only...\n_Progress updates every 500 chats._",
+        "fa": "🔒 در حال جستجوی `{q}` فقط در کانال‌های مسدود/محدود...\n_آپدیت پیشرفت هر ۵۰۰ چت._",
     },
     "search_progress": {
         "en": "🔍 Searching... `{done}/{total}` chats checked, **{m}** matches so far.",
@@ -353,13 +357,17 @@ I18N = {
         "en": "❌ No results found for `{q}` in {n} chats.",
         "fa": "❌ هیچ نتیجه‌ای برای `{q}` در {n} چت یافت نشد.",
     },
+    "search_no_restricted": {
+        "en": "❌ No restricted/blocked channels found in your account.",
+        "fa": "❌ هیچ کانال مسدود یا محدودی توی اکانتت پیدا نشد.",
+    },
     "search_caption": {
         "en": "🔍 Search: \"{q}\"\n📊 {n} matches across {c} chats\n📁 See attached file for details.",
         "fa": "🔍 جستجو: \"{q}\"\n📊 {n} نتیجه در {c} چت\n📁 جزئیات در فایل پیوست.",
     },
-    "search_caption_all": {
-        "en": "🔍 Search (incl. restricted): \"{q}\"\n📊 {n} matches across {c} chats\n📁 See attached file for details.",
-        "fa": "🔍 جستجو (شامل کانال‌های محدود): \"{q}\"\n📊 {n} نتیجه در {c} چت\n📁 جزئیات در فایل پیوست.",
+    "search_caption_restricted": {
+        "en": "🔒 Restricted Search: \"{q}\"\n📊 {n} matches across {c} restricted/blocked chats\n📁 See attached file for details.",
+        "fa": "🔒 جستجو در محدودها: \"{q}\"\n📊 {n} نتیجه در {c} چت مسدود/محدود\n📁 جزئیات در فایل پیوست.",
     },
 
     # Stats
@@ -432,8 +440,8 @@ I18N = {
             "  `{p}ocr` — extract text from image (reply to image)\n"
             "  `{p}imgmodel <model>` — change image model\n\n"
             "🔎 **Search**\n"
-            "  `{p}search <query>` — search across all chats → saves .txt file\n"
-            "  `{p}searchall <query>` — also includes restricted/blocked channels\n\n"
+            "  `{p}search <query>` — search normal chats → saves .txt file\n"
+            "  `{p}searchall <query>` — search **only** restricted/blocked channels\n\n"
             "📊 **Info**\n"
             "  `{p}alive` — health check\n"
             "  `{p}ping` — latency test\n"
@@ -477,8 +485,8 @@ I18N = {
             "  `{p}ocr` — استخراج متن از عکس (روی عکس reply بزن)\n"
             "  `{p}imgmodel <model>` — تغییر مدل تصویر\n\n"
             "🔎 **جستجو**\n"
-            "  `{p}search <متن>` — جستجو در همه چت‌ها → فایل .txt میده\n"
-            "  `{p}searchall <متن>` — همراه با کانال‌های محدود/مسدود\n\n"
+            "  `{p}search <متن>` — جستجو در چت‌های عادی → فایل .txt میده\n"
+            "  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های محدود/مسدود\n\n"
             "📊 **اطلاعات**\n"
             "  `{p}alive` — چک زنده بودن ربات\n"
             "  `{p}ping` — تست تاخیر (ms)\n"
@@ -731,7 +739,6 @@ def _classify_dialog(dialog) -> str:
 async def _search_all_chats(
     query: str,
     *,
-    include_restricted: bool = False,
     only_restricted: bool = False,
     skip_bots: bool = True,
     limit_per_chat: int = 100,
@@ -740,8 +747,8 @@ async def _search_all_chats(
     """
     Search across all dialogs.
     Args:
-        only_restricted: If True, search ONLY in restricted/blocked channels.
-        include_restricted: If True, include restricted channels alongside normal ones.
+        only_restricted: If True, search ONLY in restricted/blocked dialogs.
+                         If False, search only in NORMAL dialogs, skipping restricted ones.
     Returns (results, total_dialogs, searched, skipped, errors).
     """
     # Step 1: collect dialogs
@@ -771,8 +778,8 @@ async def _search_all_chats(
                 skipped += 1
                 continue
         else:
-            # Normal mode: skip restricted unless include_restricted is True
-            if is_restricted and not include_restricted:
+            # Normal mode: skip restricted dialogs entirely
+            if is_restricted:
                 skipped += 1
                 continue
 
@@ -823,7 +830,7 @@ def _format_search_report(
     searched: int,
     skipped: int,
     errors: list[str],
-    include_restricted: bool = False,
+    only_restricted: bool = False,
 ) -> str:
     """Format search results into a human-readable text report."""
     from datetime import datetime as _dt
@@ -837,11 +844,13 @@ def _format_search_report(
     lines.append("=" * 70)
     lines.append(f"Query:           \"{query}\"")
     lines.append(f"Generated at:    {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"Mode:            {'Including restricted/blocked' if include_restricted else 'Standard'}")
+    mode_label = "Restricted/Blocked channels ONLY" if only_restricted else "Normal chats only"
+    lines.append(f"Mode:            {mode_label}")
     lines.append(f"Total dialogs:   {total_dialogs}")
     lines.append(f"Searched:        {searched}")
     if skipped:
-        lines.append(f"Skipped:         {skipped} (bots/restricted)")
+        reason = "non-restricted + bots" if only_restricted else "bots + restricted"
+        lines.append(f"Skipped:         {skipped} ({reason})")
     lines.append(f"Total matches:   {total_matches}")
     lines.append(f"Chats matched:   {chats_with_matches}")
     lines.append("=" * 70)
@@ -893,13 +902,20 @@ def _format_search_report(
     return "\n".join(lines)
 
 
-async def _do_search_and_send(event, query: str, include_restricted: bool) -> None:
-    """Shared logic for both .search and .searchall commands."""
+async def _do_search_and_send(event, query: str, only_restricted: bool) -> None:
+    """
+    Shared logic for both .search and .searchall commands.
+
+    Args:
+        only_restricted: If True, search ONLY in restricted/blocked channels (.searchall).
+                         If False, search only in NORMAL chats, skipping restricted ones (.search).
+    """
     if len(query) < 3:
         await event.edit(t("search_too_short"))
         return
 
-    msg = await event.edit(t("search_starting", q=query[:80]))
+    start_key = "search_starting_restricted" if only_restricted else "search_starting"
+    msg = await event.edit(t(start_key, q=query[:80]))
 
     async def _on_progress(done: int, total: int, matches: int) -> None:
         try:
@@ -909,28 +925,33 @@ async def _do_search_and_send(event, query: str, include_restricted: bool) -> No
 
     results, total, searched, skipped, errors = await _search_all_chats(
         query,
-        include_restricted=include_restricted,
+        only_restricted=only_restricted,
         on_progress=_on_progress,
     )
 
     total_matches = sum(len(r["matches"]) for r in results)
 
     if not results:
+        # Special case: zero restricted channels in account
+        if only_restricted and searched == 0:
+            await msg.edit(t("search_no_restricted"))
+            return
         await msg.edit(t("search_no_results", q=query[:80], n=searched))
         return
 
     report = _format_search_report(
         query, results, total, searched, skipped, errors,
-        include_restricted=include_restricted,
+        only_restricted=only_restricted,
     )
 
     # Save to a temp file with a friendly name
     safe_query = "".join(c if c.isalnum() else "_" for c in query[:30]).strip("_") or "query"
-    fname = f"bidar_search_{safe_query}_{int(time.time())}.txt"
+    prefix = "bidar_search_restricted_" if only_restricted else "bidar_search_"
+    fname = f"{prefix}{safe_query}_{int(time.time())}.txt"
     tmp_path = Path(tempfile.gettempdir()) / fname
     try:
         tmp_path.write_text(report, encoding="utf-8")
-        caption_key = "search_caption_all" if include_restricted else "search_caption"
+        caption_key = "search_caption_restricted" if only_restricted else "search_caption"
         caption = t(caption_key, q=query[:200], n=total_matches, c=len(results))
         await client.send_file(
             event.chat_id,
@@ -941,7 +962,7 @@ async def _do_search_and_send(event, query: str, include_restricted: bool) -> No
         )
         await msg.delete()
         log.info(
-            f"[.search{'all' if include_restricted else ''}] query={query!r} "
+            f"[.search{'all' if only_restricted else ''}] query={query!r} "
             f"matches={total_matches} chats={len(results)}"
         )
     except Exception as e:  # noqa: BLE001
@@ -1470,25 +1491,25 @@ async def cmd_botlang(event):
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}search(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_search(event):
-    """Search across all chats (private + groups + public channels you're in)."""
+    """Search across NORMAL chats only (private + groups + non-restricted channels)."""
     arg = event.pattern_match.group(1)
     if not arg or not arg.strip():
         await event.edit(t("search_usage", p=CMD_PREFIX))
         return
     query = arg.strip()
-    await _do_search_and_send(event, query, include_restricted=False)
+    await _do_search_and_send(event, query, only_restricted=False)
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}searchall(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_searchall(event):
-    """Search across ALL chats including restricted/blocked channels."""
+    """Search ONLY in restricted/blocked channels."""
     arg = event.pattern_match.group(1)
     if not arg or not arg.strip():
         await event.edit(t("search_usage", p=CMD_PREFIX))
         return
     query = arg.strip()
-    await _do_search_and_send(event, query, include_restricted=True)
+    await _do_search_and_send(event, query, only_restricted=True)
 
 
 # ═════════ Info commands ═════════
