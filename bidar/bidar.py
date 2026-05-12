@@ -730,13 +730,18 @@ def _classify_dialog(dialog) -> str:
 
 async def _search_all_chats(
     query: str,
+    *,
     include_restricted: bool = False,
+    only_restricted: bool = False,
     skip_bots: bool = True,
     limit_per_chat: int = 100,
     on_progress=None,
 ) -> tuple[list[dict], int, int, int, list[str]]:
     """
     Search across all dialogs.
+    Args:
+        only_restricted: If True, search ONLY in restricted/blocked channels.
+        include_restricted: If True, include restricted channels alongside normal ones.
     Returns (results, total_dialogs, searched, skipped, errors).
     """
     # Step 1: collect dialogs
@@ -750,9 +755,6 @@ async def _search_all_chats(
     skipped = 0
     errors: list[str] = []
 
-    if on_progress:
-        await on_progress(0, total_dialogs, 0)
-
     for idx, dialog in enumerate(dialogs):
         chat_type = _classify_dialog(dialog)
 
@@ -762,9 +764,17 @@ async def _search_all_chats(
             continue
 
         is_restricted = bool(getattr(dialog.entity, "restricted", False))
-        if is_restricted and not include_restricted:
-            skipped += 1
-            continue
+
+        if only_restricted:
+            # Only process restricted/blocked dialogs; skip everything else
+            if not is_restricted:
+                skipped += 1
+                continue
+        else:
+            # Normal mode: skip restricted unless include_restricted is True
+            if is_restricted and not include_restricted:
+                skipped += 1
+                continue
 
         try:
             chat_matches = []
@@ -795,8 +805,8 @@ async def _search_all_chats(
         except Exception as e:  # noqa: BLE001
             errors.append(f"{dialog.name}: {type(e).__name__}: {e}")
 
-        # Progress callback every 5 chats
-        if on_progress and (idx + 1) % 5 == 0:
+        # Progress callback every 500 chats (avoid Telegram edit rate-limit)
+        if on_progress and (idx + 1) % 500 == 0:
             total_matches_so_far = sum(len(r["matches"]) for r in results)
             try:
                 await on_progress(idx + 1, total_dialogs, total_matches_so_far)
