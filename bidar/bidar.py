@@ -27,6 +27,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 from telethon.tl.functions.account import UpdateStatusRequest
 
 # Optional: AI integration via Emergent Universal Key
@@ -48,7 +49,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -331,6 +332,36 @@ I18N = {
     },
     "botlang_set": {"en": "✅ Bot UI language changed to **{l}**.", "fa": "✅ زبان رابط ربات به **{l}** تغییر کرد."},
 
+    # Search
+    "search_usage": {
+        "en": "🔍 **Global Search**\n\n  `{p}search <query>` — search all chats (private + groups + channels)\n  `{p}searchall <query>` — include restricted/blocked channels too\n\n📝 Example:\n  `{p}search ali`\n  `{p}search 'meeting tomorrow'`\n\nResults are saved to a `.txt` file with chat names.",
+        "fa": "🔍 **جستجوی جهانی در اکانت**\n\n  `{p}search <متن>` — جستجو در همه چت‌ها (خصوصی + گروه + کانال)\n  `{p}searchall <متن>` — همراه با کانال‌های مسدود/محدود\n\n📝 مثال:\n  `{p}search علی`\n  `{p}search 'جلسه فردا'`\n\nنتایج توی فایل `.txt` با مشخصات چت ذخیره میشن.",
+    },
+    "search_too_short": {
+        "en": "⚠️ Search query must be at least 3 characters.",
+        "fa": "⚠️ متن جستجو باید حداقل ۳ کاراکتر باشه.",
+    },
+    "search_starting": {
+        "en": "🔍 Searching `{q}` across all your chats...\n_This may take a while depending on number of chats._",
+        "fa": "🔍 در حال جستجوی `{q}` در همه چت‌هات...\n_بسته به تعداد چت‌ها ممکنه طول بکشه._",
+    },
+    "search_progress": {
+        "en": "🔍 Searching... `{done}/{total}` chats checked, **{m}** matches so far.",
+        "fa": "🔍 در حال جستجو... `{done}/{total}` چت بررسی شد، **{m}** نتیجه تاکنون.",
+    },
+    "search_no_results": {
+        "en": "❌ No results found for `{q}` in {n} chats.",
+        "fa": "❌ هیچ نتیجه‌ای برای `{q}` در {n} چت یافت نشد.",
+    },
+    "search_caption": {
+        "en": "🔍 Search: \"{q}\"\n📊 {n} matches across {c} chats\n📁 See attached file for details.",
+        "fa": "🔍 جستجو: \"{q}\"\n📊 {n} نتیجه در {c} چت\n📁 جزئیات در فایل پیوست.",
+    },
+    "search_caption_all": {
+        "en": "🔍 Search (incl. restricted): \"{q}\"\n📊 {n} matches across {c} chats\n📁 See attached file for details.",
+        "fa": "🔍 جستجو (شامل کانال‌های محدود): \"{q}\"\n📊 {n} نتیجه در {c} چت\n📁 جزئیات در فایل پیوست.",
+    },
+
     # Stats
     "stats_title": {"en": "📊 **Bidar Stats & Settings**", "fa": "📊 **آمار و تنظیمات Bidar**"},
     "stats_uptime": {"en": "⏱ Uptime", "fa": "⏱ آپ‌تایم"},
@@ -400,6 +431,9 @@ I18N = {
             "  `{p}imgedit <change>` — edit image (reply to image)\n"
             "  `{p}ocr` — extract text from image (reply to image)\n"
             "  `{p}imgmodel <model>` — change image model\n\n"
+            "🔎 **Search**\n"
+            "  `{p}search <query>` — search across all chats → saves .txt file\n"
+            "  `{p}searchall <query>` — also includes restricted/blocked channels\n\n"
             "📊 **Info**\n"
             "  `{p}alive` — health check\n"
             "  `{p}ping` — latency test\n"
@@ -442,6 +476,9 @@ I18N = {
             "  `{p}imgedit <توضیح>` — ویرایش عکس (روی عکس reply بزن)\n"
             "  `{p}ocr` — استخراج متن از عکس (روی عکس reply بزن)\n"
             "  `{p}imgmodel <model>` — تغییر مدل تصویر\n\n"
+            "🔎 **جستجو**\n"
+            "  `{p}search <متن>` — جستجو در همه چت‌ها → فایل .txt میده\n"
+            "  `{p}searchall <متن>` — همراه با کانال‌های محدود/مسدود\n\n"
             "📊 **اطلاعات**\n"
             "  `{p}alive` — چک زنده بودن ربات\n"
             "  `{p}ping` — تست تاخیر (ms)\n"
@@ -676,6 +713,235 @@ async def _ocr_image(image_bytes: bytes) -> str | None:
     except Exception as e:  # noqa: BLE001
         log.error(f"OCR error: {e}")
         return None
+
+
+# ────────── Search Helpers ──────────
+def _classify_dialog(dialog) -> str:
+    """Returns 'private', 'bot', 'group', or 'channel'."""
+    if dialog.is_user:
+        entity = dialog.entity
+        if getattr(entity, "bot", False):
+            return "bot"
+        return "private"
+    if dialog.is_group:
+        return "group"
+    return "channel"
+
+
+async def _search_all_chats(
+    query: str,
+    include_restricted: bool = False,
+    skip_bots: bool = True,
+    limit_per_chat: int = 100,
+    on_progress=None,
+) -> tuple[list[dict], int, int, int, list[str]]:
+    """
+    Search across all dialogs.
+    Returns (results, total_dialogs, searched, skipped, errors).
+    """
+    # Step 1: collect dialogs
+    dialogs = []
+    async for d in client.iter_dialogs():
+        dialogs.append(d)
+    total_dialogs = len(dialogs)
+
+    results: list[dict] = []
+    searched = 0
+    skipped = 0
+    errors: list[str] = []
+
+    if on_progress:
+        await on_progress(0, total_dialogs, 0)
+
+    for idx, dialog in enumerate(dialogs):
+        chat_type = _classify_dialog(dialog)
+
+        # Optional filters
+        if skip_bots and chat_type == "bot":
+            skipped += 1
+            continue
+
+        is_restricted = bool(getattr(dialog.entity, "restricted", False))
+        if is_restricted and not include_restricted:
+            skipped += 1
+            continue
+
+        try:
+            chat_matches = []
+            async for msg in client.iter_messages(dialog.entity, search=query, limit=limit_per_chat):
+                msg_text = msg.text or msg.message or ""
+                if not msg_text:
+                    continue
+                chat_matches.append({
+                    "id": msg.id,
+                    "text": msg_text,
+                    "date": msg.date,
+                    "sender_id": msg.sender_id,
+                })
+
+            if chat_matches:
+                results.append({
+                    "name": dialog.name or "Unknown",
+                    "id": dialog.id,
+                    "type": chat_type,
+                    "restricted": is_restricted,
+                    "matches": chat_matches,
+                })
+            searched += 1
+
+        except FloodWaitError as e:
+            errors.append(f"{dialog.name}: rate-limited, waited {e.seconds}s")
+            await asyncio.sleep(min(e.seconds + 1, 60))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{dialog.name}: {type(e).__name__}: {e}")
+
+        # Progress callback every 5 chats
+        if on_progress and (idx + 1) % 5 == 0:
+            total_matches_so_far = sum(len(r["matches"]) for r in results)
+            try:
+                await on_progress(idx + 1, total_dialogs, total_matches_so_far)
+            except Exception:  # noqa: BLE001
+                pass
+
+    return results, total_dialogs, searched, skipped, errors
+
+
+def _format_search_report(
+    query: str,
+    results: list[dict],
+    total_dialogs: int,
+    searched: int,
+    skipped: int,
+    errors: list[str],
+    include_restricted: bool = False,
+) -> str:
+    """Format search results into a human-readable text report."""
+    from datetime import datetime as _dt
+
+    total_matches = sum(len(r["matches"]) for r in results)
+    chats_with_matches = len(results)
+
+    lines: list[str] = []
+    lines.append("=" * 70)
+    lines.append("🔍 BIDAR SEARCH REPORT")
+    lines.append("=" * 70)
+    lines.append(f"Query:           \"{query}\"")
+    lines.append(f"Generated at:    {_dt.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"Mode:            {'Including restricted/blocked' if include_restricted else 'Standard'}")
+    lines.append(f"Total dialogs:   {total_dialogs}")
+    lines.append(f"Searched:        {searched}")
+    if skipped:
+        lines.append(f"Skipped:         {skipped} (bots/restricted)")
+    lines.append(f"Total matches:   {total_matches}")
+    lines.append(f"Chats matched:   {chats_with_matches}")
+    lines.append("=" * 70)
+    lines.append("")
+
+    if not results:
+        lines.append("No matching messages found.")
+        return "\n".join(lines)
+
+    # Sort: chats with most matches first
+    results = sorted(results, key=lambda r: len(r["matches"]), reverse=True)
+
+    for idx, chat in enumerate(results, start=1):
+        lines.append("")
+        lines.append("─" * 70)
+        flag = " 🔒RESTRICTED" if chat.get("restricted") else ""
+        lines.append(f"#{idx}. 📁 {chat['name']}{flag}")
+        lines.append(f"     ID:      {chat['id']}")
+        lines.append(f"     Type:    {chat['type']}")
+        lines.append(f"     Matches: {len(chat['matches'])}")
+        lines.append("─" * 70)
+
+        for m in chat["matches"]:
+            date_str = m["date"].strftime("%Y-%m-%d %H:%M:%S") if m["date"] else "(unknown)"
+            text = m["text"]
+            if len(text) > 800:
+                text = text[:800] + " ... [truncated]"
+            sender = f" (sender_id={m['sender_id']})" if m.get("sender_id") else ""
+            lines.append("")
+            lines.append(f"  📅 [{date_str}] msg_id={m['id']}{sender}")
+            for tline in text.split("\n"):
+                lines.append(f"     > {tline}")
+
+    if errors:
+        lines.append("")
+        lines.append("=" * 70)
+        lines.append("⚠️ Errors encountered:")
+        lines.append("=" * 70)
+        for e in errors[:50]:
+            lines.append(f"  • {e}")
+        if len(errors) > 50:
+            lines.append(f"  ... and {len(errors) - 50} more errors")
+
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append(f"End of report — generated by Bidar v{VERSION}")
+    lines.append("=" * 70)
+
+    return "\n".join(lines)
+
+
+async def _do_search_and_send(event, query: str, include_restricted: bool) -> None:
+    """Shared logic for both .search and .searchall commands."""
+    if len(query) < 3:
+        await event.edit(t("search_too_short"))
+        return
+
+    msg = await event.edit(t("search_starting", q=query[:80]))
+
+    async def _on_progress(done: int, total: int, matches: int) -> None:
+        try:
+            await msg.edit(t("search_progress", done=done, total=total, m=matches))
+        except Exception:  # noqa: BLE001
+            pass
+
+    results, total, searched, skipped, errors = await _search_all_chats(
+        query,
+        include_restricted=include_restricted,
+        on_progress=_on_progress,
+    )
+
+    total_matches = sum(len(r["matches"]) for r in results)
+
+    if not results:
+        await msg.edit(t("search_no_results", q=query[:80], n=searched))
+        return
+
+    report = _format_search_report(
+        query, results, total, searched, skipped, errors,
+        include_restricted=include_restricted,
+    )
+
+    # Save to a temp file with a friendly name
+    safe_query = "".join(c if c.isalnum() else "_" for c in query[:30]).strip("_") or "query"
+    fname = f"bidar_search_{safe_query}_{int(time.time())}.txt"
+    tmp_path = Path(tempfile.gettempdir()) / fname
+    try:
+        tmp_path.write_text(report, encoding="utf-8")
+        caption_key = "search_caption_all" if include_restricted else "search_caption"
+        caption = t(caption_key, q=query[:200], n=total_matches, c=len(results))
+        await client.send_file(
+            event.chat_id,
+            str(tmp_path),
+            caption=caption,
+            force_document=True,
+            reply_to=event.reply_to_msg_id,
+        )
+        await msg.delete()
+        log.info(
+            f"[.search{'all' if include_restricted else ''}] query={query!r} "
+            f"matches={total_matches} chats={len(results)}"
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Search send file error: {e}")
+        await msg.edit(f"❌ Error sending results file: {e}")
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
 
 
 # ─────────────────── Background: online keeper ───────────────────
@@ -1188,6 +1454,31 @@ async def cmd_botlang(event):
     config["bot_lang"] = new_lang
     save_config()
     await event.edit(t("botlang_set", l=new_lang))
+
+
+# ═════════ Search (Global) ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}search(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_search(event):
+    """Search across all chats (private + groups + public channels you're in)."""
+    arg = event.pattern_match.group(1)
+    if not arg or not arg.strip():
+        await event.edit(t("search_usage", p=CMD_PREFIX))
+        return
+    query = arg.strip()
+    await _do_search_and_send(event, query, include_restricted=False)
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}searchall(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_searchall(event):
+    """Search across ALL chats including restricted/blocked channels."""
+    arg = event.pattern_match.group(1)
+    if not arg or not arg.strip():
+        await event.edit(t("search_usage", p=CMD_PREFIX))
+        return
+    query = arg.strip()
+    await _do_search_and_send(event, query, include_restricted=True)
 
 
 # ═════════ Info commands ═════════
