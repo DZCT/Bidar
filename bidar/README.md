@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.8.0-success?style=flat-square)](https://github.com/MamawliV2/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.8.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -117,7 +117,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 ## 🚀 نصب تک‌خطی
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/MamawliV2/Bidar/main/bidar/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/DZCT/Bidar/main/bidar/install.sh)
 ```
 
 <div dir="rtl">
@@ -143,7 +143,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/MamawliV2/Bidar/main/bidar/i
 
 ```bash
 # کلون پروژه
-git clone https://github.com/MamawliV2/Bidar.git /opt/bidar-repo
+git clone https://github.com/DZCT/Bidar.git /opt/bidar-repo
 cd /opt/bidar-repo/bidar
 
 # ساخت محیط مجازی
@@ -618,7 +618,7 @@ bidar/
 همه فرم‌های مشارکت خوش‌اومدن:
 
 1. ⭐ **Star** دادن به ریپو
-2. 🐛 گزارش باگ در [Issues](https://github.com/MamawliV2/bidar/issues)
+2. 🐛 گزارش باگ در [Issues](https://github.com/DZCT/bidar/issues)
 3. 💡 پیشنهاد قابلیت جدید
 4. 🔧 Pull Request
 
@@ -642,9 +642,9 @@ bidar/
 
 <br />
 
-[⭐ Star on GitHub](https://github.com/MamawliV2/bidar) •
-[🐛 Report Bug](https://github.com/MamawliV2/bidar/issues) •
-[💡 Request Feature](https://github.com/MamawliV2/bidar/issues)
+[⭐ Star on GitHub](https://github.com/DZCT/bidar) •
+[🐛 Report Bug](https://github.com/DZCT/bidar/issues) •
+[💡 Request Feature](https://github.com/DZCT/bidar/issues)
 
 <br />
 

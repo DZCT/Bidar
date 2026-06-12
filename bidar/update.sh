@@ -8,13 +8,13 @@
 # ║   یا از راه دور (با توکن برای ریپو private):                        ║
 # ║     export GH_TOKEN="ghp_..."                                    ║
 # ║     bash <(curl -fsSL -H "Authorization: token $GH_TOKEN" \      ║
-# ║       https://raw.githubusercontent.com/MamawliV2/Bidar/main/bidar/update.sh)  ║
+# ║       https://raw.githubusercontent.com/DZCT/Bidar/main/bidar/update.sh)  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
 
 # ──────────────── پیکربندی ────────────────
-REPO_URL="${BIDAR_REPO:-https://github.com/MamawliV2/Bidar.git}"
+REPO_URL="${BIDAR_REPO:-https://github.com/DZCT/Bidar.git}"
 INSTALL_DIR="${BIDAR_DIR:-/opt/bidar}"
 SERVICE_NAME="bidar"
 EXTRA_INDEX="https://d33sy5i8bnduwe.cloudfront.net/simple/"

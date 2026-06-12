@@ -4,8 +4,8 @@
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
 
 ## User Context
-- یوزرنیم گیت‌هاب: `MamawliV2`
-- ریپو: `MamawliV2/Bidar` (Private، با PAT)
+- یوزرنیم گیت‌هاب: `DZCT`
+- ریپو: `DZCT/Bidar` (Private، با PAT)
 - محل اجرا: VPS (Ubuntu 22.04.1)
 - زبان ترجیحی کاربر: فارسی
 
@@ -114,7 +114,7 @@
 ```bash
 export GH_TOKEN="github_pat_..."
 bash <(curl -fsSL -H "Authorization: token $GH_TOKEN" \
-  https://raw.githubusercontent.com/MamawliV2/Bidar/main/bidar/install.sh)
+  https://raw.githubusercontent.com/DZCT/Bidar/main/bidar/install.sh)
 ```
 
 ## Test Results (Jun 2026 — v1.8.0)
