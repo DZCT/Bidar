@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 # Setup environment so bidar.py can be imported
-os.environ.setdefault("API_ID", "0")
+os.environ.setdefault("API_ID", "12345")
 os.environ.setdefault("API_HASH", "x")
 os.environ.setdefault("PHONE", "x")
 

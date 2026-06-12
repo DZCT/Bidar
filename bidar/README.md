@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.7.0-success?style=flat-square)](https://github.com/MamawliV2/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.8.0-success?style=flat-square)](https://github.com/MamawliV2/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -90,6 +90,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 | 🎨 | **تولید/ویرایش تصویر** | با Gemini Nano Banana (`.img` و `.imgedit`) |
 | 🔠 | **OCR (متن از عکس)** | استخراج متن از تصاویر با `.ocr` |
 | 🔍 | **جستجوی جهانی** | `.search` در همه چت‌ها + `.searchall` فقط در کانال‌های مسدود → فایل `.txt` |
+| 🎵 | **دانلود موزیک ساندکلاد** | `.sc` با لینک یا جستجوی اسم آهنگ → ارسال MP3 با کاور |
 | 🌍 | **رابط دوزبانه** | فارسی / انگلیسی — تعویض زنده با `.botlang` |
 | 🔄 | **ری‌کانکت خودکار** | در صورت قطعی، خودش دوباره وصل میشه |
 
@@ -295,6 +296,33 @@ sudo systemctl enable --now bidar
 .search علی
 .search 'جلسه فردا'
 .searchall رمز
+```
+
+</div>
+
+### 🎵 دانلود موزیک ساندکلاد
+
+<div dir="rtl">
+
+دانلود آهنگ از ساندکلاد — هم با لینک، هم با جستجوی اسم آهنگ.
+
+| دستور | کاربرد |
+|:---|:---|
+| `.sc <لینک>` | دانلود مستقیم آهنگ از لینک ساندکلاد |
+| `.sc <اسم آهنگ>` | جستجو در ساندکلاد و نمایش **۵ نتیجه اول** |
+| `.sc <شماره>` | دانلود نتیجه انتخابی از جستجوی قبلی (مثلاً `.sc 2`) |
+
+**ویژگی‌ها:**
+- 🎧 ارسال به صورت فایل صوتی تلگرام با **عنوان، خواننده و کاور آلبوم**
+- 🎼 خروجی MP3 با کیفیت 192k (اگه `ffmpeg` نصب باشه — نصاب خودش نصبش می‌کنه)
+- 💬 فایل توی همون چت و به صورت ریپلای ارسال میشه
+- 🆓 بدون نیاز به API Key ساندکلاد (با `yt-dlp`)
+
+**مثال‌ها:**
+```
+.sc https://soundcloud.com/artist/track
+.sc شادمهر عقیلی ستاره
+.sc 2
 ```
 
 </div>
@@ -620,6 +648,6 @@ bidar/
 
 <br />
 
-<sub>Bidar v1.7.0 — 2026</sub>
+<sub>Bidar v1.8.0 — 2026</sub>
 
 </div>

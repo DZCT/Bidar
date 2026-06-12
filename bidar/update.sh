@@ -268,6 +268,30 @@ update_deps() {
   ok "وابستگی‌ها به‌روز شدن"
 }
 
+# ──────────────── نصب ffmpeg (برای MP3 ساندکلاد) ────────────────
+ensure_ffmpeg() {
+  head1 "بررسی ffmpeg (برای دانلود موزیک ساندکلاد)"
+  if command -v ffmpeg >/dev/null 2>&1; then
+    ok "ffmpeg نصبه"
+    return 0
+  fi
+  warn "ffmpeg نصب نیست — برای خروجی MP3 با کیفیت در دستور .sc توصیه میشه."
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update -y >/dev/null 2>&1 || true
+    $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg || warn "نصب ffmpeg ناموفق بود (اختیاریه)"
+  elif command -v dnf >/dev/null 2>&1; then
+    $SUDO dnf install -y ffmpeg || warn "نصب ffmpeg ناموفق بود (اختیاریه)"
+  elif command -v yum >/dev/null 2>&1; then
+    $SUDO yum install -y ffmpeg || warn "نصب ffmpeg ناموفق بود (اختیاریه)"
+  elif command -v pacman >/dev/null 2>&1; then
+    $SUDO pacman -Sy --noconfirm ffmpeg || warn "نصب ffmpeg ناموفق بود (اختیاریه)"
+  elif command -v apk >/dev/null 2>&1; then
+    $SUDO apk add --no-cache ffmpeg || warn "نصب ffmpeg ناموفق بود (اختیاریه)"
+  else
+    warn "پکیج منیجر ناشناخته — ffmpeg رو دستی نصب کن"
+  fi
+}
+
 # ──────────────── آپدیت سرویس systemd ────────────────
 update_service() {
   local svc_file="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -350,6 +374,7 @@ main() {
   restore_files         # دوباره برمی‌گردیم تا مطمئن بشیم session/env حفظ شدن
   check_new_env_vars
   update_deps
+  ensure_ffmpeg
   update_service
   start_service
   farewell

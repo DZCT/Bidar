@@ -1,4 +1,4 @@
-# PRD — Bidar v1.7.0 (Always Online Telegram Userbot + AI Assistant)
+# PRD — Bidar v1.8.0 (Always Online Telegram Userbot + AI Assistant)
 
 ## Problem Statement
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
@@ -61,7 +61,19 @@
 - ✅ Bilingual UI keys + help menu entries
 - ✅ Unit test: `tests/test_search.py` — 6 tests, all passing
 
-## Commands Summary (v1.7.0)
+### v1.8.0 — SoundCloud Music Download (Completed Jun 2026)
+- ✅ `.sc <link>` — direct download from SoundCloud link (soundcloud.com / on.soundcloud / api.soundcloud / snd.sc)
+- ✅ `.sc <song name>` — search SoundCloud (`scsearch5:`), show top 5 results (title, artist, duration)
+- ✅ `.sc <1-5>` — download a result from last search (per-chat result memory `_sc_results`)
+- ✅ Sent as Telegram audio with title/performer/duration attributes + album cover thumbnail
+- ✅ Prefers progressive MP3; converts to MP3 192k when ffmpeg available (yt-dlp postprocessor)
+- ✅ Blocking yt-dlp calls run via `asyncio.to_thread` (no event-loop blocking)
+- ✅ File sent in same chat as reply; temp dir cleaned up always
+- ✅ `yt-dlp` added to requirements.txt; ffmpeg added to install.sh prereqs + update.sh `ensure_ffmpeg`
+- ✅ Bilingual UI keys (11 keys) + help menu entries
+- ✅ Unit test: `tests/test_soundcloud.py` — 48 checks, all passing + real E2E download verified
+
+## Commands Summary (v1.8.0)
 **Total: 30+ commands**, all `@owner_only`
 
 | Category | Commands |
@@ -72,6 +84,7 @@
 | Translation | `.lang`, `.tl`, `.to` |
 | Image | `.img`, `.imgedit`, `.imgmodel`, `.ocr` |
 | Search | `.search`, `.searchall` |
+| Music | `.sc` (link / search / pick) |
 | Admin | `.botlang`, `.restart` |
 | Info | `.ping`, `.stats`, `.alive`, `.id`, `.help` |
 
@@ -104,20 +117,16 @@ bash <(curl -fsSL -H "Authorization: token $GH_TOKEN" \
   https://raw.githubusercontent.com/MamawliV2/Bidar/main/bidar/install.sh)
 ```
 
-## Test Results (Feb 13, 2026)
-✅ Syntax check passes (`python -c "import ast; ast.parse(...)"`)
-✅ Lint check passes (`ruff`)
-✅ Unit tests for `.search` / `.searchall`:
-   - Normal mode skips restricted + bots
-   - Restricted-only mode picks ONLY restricted dialogs
-   - Report formatting correct for both modes
-   - All 9 i18n search keys present (en + fa)
-   - Progress callback fires exactly every 500 chats
+## Test Results (Jun 2026 — v1.8.0)
+✅ Syntax check passes
+✅ `tests/test_search.py` — all passing (regression OK; note: tests now use API_ID=12345, Telethon rejects 0)
+✅ `tests/test_soundcloud.py` — 48 checks passing (URL regex, routing, search/download sync mocked, i18n keys)
+✅ Real E2E: live SoundCloud search (5 results, Persian query) + real MP3 download (4MB, cover art) via bidar functions
 
 ## Next Action Items
-- کاربر "Save to GitHub" بزنه تا v1.7.0 روی ریپو push بشه
-- روی VPS با `bash update.sh` آپدیت کنه
-- توی تلگرام `.help` رو ببینه و `.search` / `.searchall` رو تست کنه
+- کاربر "Save to GitHub" بزنه تا v1.8.0 روی ریپو push بشه
+- روی VPS با `bash update.sh` آپدیت کنه (ffmpeg خودکار نصب میشه)
+- توی تلگرام `.sc <اسم آهنگ>` و `.sc <لینک>` رو تست کنه
 
 ## Backlog (Prioritized)
 ### P1

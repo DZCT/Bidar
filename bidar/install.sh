@@ -139,6 +139,7 @@ ensure_prereqs() {
   python3 -c "import venv" 2>/dev/null || need+=(python3-venv)
   command -v git     >/dev/null 2>&1 || need+=(git)
   command -v curl    >/dev/null 2>&1 || need+=(curl)
+  command -v ffmpeg  >/dev/null 2>&1 || need+=(ffmpeg)
 
   # اصلاح اسامی برای پکیج منیجرهای non-debian
   if [[ "$pm" != "apt" ]]; then
@@ -157,7 +158,7 @@ ensure_prereqs() {
     local uniq=(); declare -A seen=()
     for p in "${need[@]}"; do [[ -z "${seen[$p]:-}" ]] && { uniq+=("$p"); seen[$p]=1; }; done
     warn "این پکیج‌ها نصب نیستن: ${uniq[*]}"
-    pm_install "$pm" "${uniq[@]}"
+    pm_install "$pm" "${uniq[@]}" || warn "نصب بعضی پکیج‌ها ناموفق بود (ffmpeg اختیاریه — برای خروجی MP3 دانلود ساندکلاد)"
   fi
 
   # چک ورژن پایتون

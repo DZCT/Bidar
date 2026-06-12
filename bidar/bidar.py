@@ -6,6 +6,7 @@ Features:
   • Always-online (UpdateStatusRequest periodic)
   • Static & AI-powered auto-reply with per-chat context
   • Image generation, editing, OCR via Gemini
+  • SoundCloud music download (.sc — link / search / pick)
   • Translation (.tl, .to)
   • Bilingual UI (English + Persian) — switchable at runtime
   • Owner-only command lock with double safety check
@@ -21,14 +22,18 @@ import base64
 import json
 import logging
 import os
+import re
+import shutil
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.tl.functions.account import UpdateStatusRequest
+from telethon.tl.types import DocumentAttributeAudio
 
 # Optional: AI integration via Emergent Universal Key
 try:
@@ -40,6 +45,14 @@ except ImportError:
     UserMessage = None  # type: ignore
     ImageContent = None  # type: ignore
 
+# Optional: SoundCloud download via yt-dlp
+try:
+    import yt_dlp  # type: ignore
+    YTDLP_OK = True
+except ImportError:
+    YTDLP_OK = False
+    yt_dlp = None  # type: ignore
+
 # ────────────────────────── Base config (.env) ──────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -49,7 +62,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -128,6 +141,7 @@ stats = {
     "ai_replies": 0,
 }
 _chat_sessions: dict[str, object] = {}
+_sc_results: dict[int, list[dict]] = {}  # per-chat last SoundCloud search results
 
 # ───────────────────────── Logging ─────────────────────────
 logging.basicConfig(
@@ -407,6 +421,31 @@ I18N = {
         "fa": "♻️ در حال ری‌استارت... (systemd دوباره بالا میاره)",
     },
 
+    # SoundCloud
+    "sc_usage": {
+        "en": "🎵 **SoundCloud Downloader**\n\n  `{p}sc <link>` — download track from link\n  `{p}sc <song name>` — search SoundCloud (top 5 results)\n  `{p}sc <1-5>` — download from last search results\n\n📝 Examples:\n  `{p}sc https://soundcloud.com/artist/track`\n  `{p}sc shadmehr aghili setareh`\n  `{p}sc 2`",
+        "fa": "🎵 **دانلود از ساندکلاد**\n\n  `{p}sc <لینک>` — دانلود مستقیم آهنگ از لینک\n  `{p}sc <اسم آهنگ>` — جستجو در ساندکلاد (۵ نتیجه اول)\n  `{p}sc <۱ تا ۵>` — دانلود از نتایج جستجوی قبلی\n\n📝 مثال:\n  `{p}sc https://soundcloud.com/artist/track`\n  `{p}sc شادمهر عقیلی ستاره`\n  `{p}sc 2`",
+    },
+    "sc_lib_missing": {
+        "en": "❌ `yt-dlp` is not installed.\n\n🔧 Install it:\n  `pip install yt-dlp`\nThen restart the bot.",
+        "fa": "❌ کتابخونه `yt-dlp` نصب نیست.\n\n🔧 نصبش کن:\n  `pip install yt-dlp`\nبعد ربات رو ری‌استارت کن.",
+    },
+    "sc_searching": {"en": "🔎 Searching SoundCloud: _{q}_ ...", "fa": "🔎 در حال جستجو در ساندکلاد: _{q}_ ..."},
+    "sc_no_results": {"en": "❌ No results found for: _{q}_", "fa": "❌ نتیجه‌ای برای _{q}_ پیدا نشد."},
+    "sc_results": {
+        "en": "🎵 **SoundCloud results for:** _{q}_\n\n{list}\n\n⬇️ To download, send: `{p}sc <number>`\nExample: `{p}sc 1`",
+        "fa": "🎵 **نتایج ساندکلاد برای:** _{q}_\n\n{list}\n\n⬇️ برای دانلود بفرست: `{p}sc <شماره>`\nمثال: `{p}sc 1`",
+    },
+    "sc_no_pending": {
+        "en": "❌ No previous search results in this chat. First search:\n`{p}sc <song name>`",
+        "fa": "❌ نتیجه جستجوی قبلی توی این چت وجود نداره. اول جستجو کن:\n`{p}sc <اسم آهنگ>`",
+    },
+    "sc_invalid_pick": {"en": "⚠️ Pick a number between 1 and {n}.", "fa": "⚠️ یه عدد بین ۱ تا {n} انتخاب کن."},
+    "sc_downloading": {"en": "🎵 Downloading from SoundCloud...", "fa": "🎵 در حال دانلود از ساندکلاد..."},
+    "sc_uploading": {"en": "📤 Uploading: _{title}_ ...", "fa": "📤 در حال آپلود: _{title}_ ..."},
+    "sc_failed": {"en": "❌ Download failed: `{e}`", "fa": "❌ دانلود ناموفق بود: `{e}`"},
+    "sc_caption": {"en": "🎵 **{title}**\n👤 {artist}\n☁️ SoundCloud", "fa": "🎵 **{title}**\n👤 {artist}\n☁️ ساندکلاد"},
+
     # Help — full text (long)
     "help_full": {
         "en": (
@@ -442,6 +481,9 @@ I18N = {
             "🔎 **Search**\n"
             "  `{p}search <query>` — search normal chats → saves .txt file\n"
             "  `{p}searchall <query>` — search **only** restricted/blocked channels\n\n"
+            "🎵 **Music (SoundCloud)**\n"
+            "  `{p}sc <link>` — download track from link\n"
+            "  `{p}sc <name>` — search (top 5) → pick with `{p}sc <num>`\n\n"
             "📊 **Info**\n"
             "  `{p}alive` — health check\n"
             "  `{p}ping` — latency test\n"
@@ -487,6 +529,9 @@ I18N = {
             "🔎 **جستجو**\n"
             "  `{p}search <متن>` — جستجو در چت‌های عادی → فایل .txt میده\n"
             "  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های محدود/مسدود\n\n"
+            "🎵 **موزیک (ساندکلاد)**\n"
+            "  `{p}sc <لینک>` — دانلود آهنگ از لینک\n"
+            "  `{p}sc <اسم>` — جستجو (۵ نتیجه) → انتخاب با `{p}sc <شماره>`\n\n"
             "📊 **اطلاعات**\n"
             "  `{p}alive` — چک زنده بودن ربات\n"
             "  `{p}ping` — تست تاخیر (ms)\n"
@@ -721,6 +766,139 @@ async def _ocr_image(image_bytes: bytes) -> str | None:
     except Exception as e:  # noqa: BLE001
         log.error(f"OCR error: {e}")
         return None
+
+
+# ────────── SoundCloud Helpers ──────────
+_SC_URL_RE = re.compile(r"https?://(?:[\w.-]+\.)?(?:soundcloud\.com|snd\.sc)/\S+", re.IGNORECASE)
+
+
+def _fmt_duration(seconds) -> str:
+    """Format track duration as M:SS or H:MM:SS."""
+    if not seconds:
+        return "?:??"
+    seconds = int(seconds)
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def _sc_search_sync(query: str) -> list[dict]:
+    """Search SoundCloud (top 5). Blocking — run in a thread."""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "extract_flat": True,
+        "skip_download": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"scsearch5:{query}", download=False)
+    results = []
+    for e in (info.get("entries") or []):
+        if not e:
+            continue
+        url = e.get("url") or e.get("webpage_url")
+        if not url:
+            continue
+        results.append({
+            "title": e.get("title") or "Unknown",
+            "url": url,
+            "duration": e.get("duration"),
+            "uploader": e.get("uploader") or e.get("channel") or "",
+        })
+    return results
+
+
+def _sc_download_sync(url: str, tmpdir: str) -> dict | None:
+    """Download a SoundCloud track into tmpdir. Blocking — run in a thread.
+
+    Prefers progressive MP3; converts to MP3 192k when ffmpeg is available.
+    Returns dict with filepath/title/uploader/duration/thumb, or None.
+    """
+    have_ffmpeg = shutil.which("ffmpeg") is not None
+    opts = {
+        "format": "bestaudio[ext=mp3]/bestaudio/best",
+        "outtmpl": os.path.join(tmpdir, "%(title).80s.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "noplaylist": True,
+    }
+    if have_ffmpeg:
+        opts["postprocessors"] = [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }]
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+    if info and "entries" in info:
+        entries = [e for e in info["entries"] if e]
+        info = entries[0] if entries else None
+    if not info:
+        return None
+    # Locate the downloaded audio file
+    audio_exts = {".mp3", ".m4a", ".opus", ".ogg", ".aac", ".wav", ".flac"}
+    filepath = None
+    for name in os.listdir(tmpdir):
+        if os.path.splitext(name)[1].lower() in audio_exts:
+            filepath = os.path.join(tmpdir, name)
+            break
+    if not filepath:
+        return None
+    # Fetch cover art for the Telegram audio thumbnail
+    thumb_path = None
+    thumb_url = info.get("thumbnail") or ""
+    if thumb_url.split("?")[0].lower().endswith((".jpg", ".jpeg", ".png")):
+        try:
+            thumb_path = os.path.join(tmpdir, "cover.jpg")
+            urllib.request.urlretrieve(thumb_url, thumb_path)
+        except Exception:  # noqa: BLE001
+            thumb_path = None
+    return {
+        "filepath": filepath,
+        "title": info.get("title") or "Unknown",
+        "uploader": info.get("uploader") or "",
+        "duration": int(info.get("duration") or 0),
+        "thumb": thumb_path,
+    }
+
+
+async def _sc_download_and_send(event, url: str) -> None:
+    """Download a SoundCloud track and send it as audio in the current chat."""
+    msg = await event.edit(t("sc_downloading"))
+    tmpdir = tempfile.mkdtemp(prefix="bidar_sc_")
+    try:
+        info = await asyncio.to_thread(_sc_download_sync, url, tmpdir)
+        if not info:
+            await msg.edit(t("sc_failed", e="no audio file"))
+            return
+        await msg.edit(t("sc_uploading", title=info["title"][:80]))
+        attrs = [DocumentAttributeAudio(
+            duration=info["duration"],
+            title=info["title"][:60],
+            performer=(info["uploader"] or "SoundCloud")[:60],
+        )]
+        await client.send_file(
+            event.chat_id,
+            info["filepath"],
+            caption=t("sc_caption", title=info["title"][:200], artist=info["uploader"] or "—"),
+            attributes=attrs,
+            thumb=info["thumb"],
+            reply_to=event.reply_to_msg_id,
+        )
+        await msg.delete()
+        log.info(f"[.sc] sent: {info['title']}")
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.sc] download/send failed: {e}")
+        try:
+            await msg.edit(t("sc_failed", e=str(e)[:200]))
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ────────── Search Helpers ──────────
@@ -1510,6 +1688,60 @@ async def cmd_searchall(event):
         return
     query = arg.strip()
     await _do_search_and_send(event, query, only_restricted=True)
+
+
+# ═════════ SoundCloud Music Download ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}sc(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_soundcloud(event):
+    """Download music from SoundCloud: by link, by search query, or by picking a result number."""
+    arg = event.pattern_match.group(1)
+    if not arg or not arg.strip():
+        await event.edit(t("sc_usage", p=CMD_PREFIX))
+        return
+    if not YTDLP_OK:
+        await event.edit(t("sc_lib_missing"))
+        return
+    arg = arg.strip()
+    chat_id = event.chat_id
+
+    # Case 1: pick a number from the last search results
+    if arg.isdigit():
+        results = _sc_results.get(chat_id)
+        if not results:
+            await event.edit(t("sc_no_pending", p=CMD_PREFIX))
+            return
+        idx = int(arg)
+        if not (1 <= idx <= len(results)):
+            await event.edit(t("sc_invalid_pick", n=len(results)))
+            return
+        await _sc_download_and_send(event, results[idx - 1]["url"])
+        return
+
+    # Case 2: direct SoundCloud link
+    m = _SC_URL_RE.search(arg)
+    if m:
+        await _sc_download_and_send(event, m.group(0))
+        return
+
+    # Case 3: search by song name → show top 5 results
+    msg = await event.edit(t("sc_searching", q=arg[:100]))
+    try:
+        results = await asyncio.to_thread(_sc_search_sync, arg)
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.sc] search failed: {e}")
+        await msg.edit(t("sc_failed", e=str(e)[:200]))
+        return
+    if not results:
+        await msg.edit(t("sc_no_results", q=arg[:100]))
+        return
+    _sc_results[chat_id] = results
+    lines = []
+    for i, r in enumerate(results, 1):
+        dur = _fmt_duration(r["duration"])
+        up = f" — {r['uploader']}" if r["uploader"] else ""
+        lines.append(f"**{i}.** {r['title']}{up}  `[{dur}]`")
+    await msg.edit(t("sc_results", q=arg[:100], list="\n".join(lines), p=CMD_PREFIX))
 
 
 # ═════════ Info commands ═════════
