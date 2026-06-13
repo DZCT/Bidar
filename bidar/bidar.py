@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import html
 import json
 import logging
 import os
@@ -65,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -937,14 +938,107 @@ def _fmt_duration(seconds) -> str:
     return f"{m}:{s:02d}"
 
 
+def _http_json(url: str, timeout: int = 15) -> dict:
+    """GET a JSON endpoint. Blocking — run in a thread."""
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read(300_000).decode("utf-8", errors="ignore"))
+
+
+def _clean_query(q: str) -> str:
+    """Normalize a metadata string into a clean search query."""
+    q = html.unescape(q or "").replace("\xa0", " ")
+    # Drop noise like "(Official Video)", "[Lyrics]", "(HD)" …
+    q = re.sub(r"[\(\[][^)\]]*(?:official|lyric|lyrics|video|audio|visualizer|hd|4k|mv)[^)\]]*[\)\]]",
+               "", q, flags=re.I)
+    q = re.sub(r"\s*-\s*(?:Single|EP)\s*$", "", q, flags=re.I)
+    q = re.sub(r"\s{2,}", " ", q)
+    return q.strip(" -–—·|").strip()
+
+
+def _apple_lookup(url: str) -> str | None:
+    """Resolve an Apple Music URL to 'Artist - Title' via the public iTunes
+    Lookup API (no auth, reliable — page scraping on music.apple.com is flaky)."""
+    parsed = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(parsed.query)
+    ids: list[str] = []
+    if qs.get("i"):  # album link pointing at a specific track: ?i=<track_id>
+        ids.append(qs["i"][0])
+    ids += [i for i in re.findall(r"/(\d{5,})", parsed.path) if i not in ids][::-1]
+    mc = re.match(r"^/([a-z]{2})/", parsed.path, re.I)
+    country = mc.group(1) if mc else "us"
+    for id_ in ids:
+        try:
+            data = _http_json(f"https://itunes.apple.com/lookup?id={id_}&country={country}")
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"[music] iTunes lookup failed for {id_}: {e}")
+            continue
+        for r in (data or {}).get("results", []):
+            artist = (r.get("artistName") or "").strip()
+            track = (r.get("trackName") or r.get("collectionName") or "").strip()
+            if artist and track:
+                return f"{artist} - {track}"
+    return None
+
+
+def _deezer_lookup(url: str) -> str | None:
+    """Resolve a Deezer track URL to 'Artist - Title' via the public Deezer API."""
+    m = re.search(r"/track/(\d+)", url)
+    if not m:
+        return None
+    try:
+        data = _http_json(f"https://api.deezer.com/track/{m.group(1)}")
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"[music] Deezer API failed: {e}")
+        return None
+    title = (data.get("title") or "").strip()
+    artist = ((data.get("artist") or {}).get("name") or "").strip()
+    if artist and title:
+        return f"{artist} - {title}"
+    return title or None
+
+
+def _youtube_title_query(url: str) -> str | None:
+    """Get 'Artist - Title' for a YouTube / YouTube Music video via oEmbed.
+    Works even when video downloads are blocked for the server's IP."""
+    try:
+        data = _http_json(
+            "https://www.youtube.com/oembed?format=json&url=" + urllib.parse.quote(url, safe=""))
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"[music] YouTube oEmbed failed: {e}")
+        return None
+    title = _clean_query(data.get("title") or "")
+    author = re.sub(r"\s*-\s*Topic$", "", (data.get("author_name") or "").strip()).strip()
+    if not title:
+        return None
+    if author and author.lower() not in title.lower():
+        return f"{author} - {title}"
+    return title
+
+
 def _fetch_drm_metadata(url: str, platform: str) -> str | None:
     """For DRM-protected platforms (Spotify, Deezer, Apple Music, Tidal),
     fetch track metadata and return a search query of the form 'Artist - Title'.
     Returns None on failure.
 
-    Uses public oEmbed / embed endpoints where available (bot-friendly), with
-    OpenGraph meta parsing as a fallback.
+    Order of strategies:
+      0. Official public lookup APIs (iTunes / Deezer) — most reliable
+      1. Spotify oEmbed + embed page
+      2. OpenGraph meta tags from the page itself (universal fallback)
     """
+    # ── Strategy 0: official public APIs ──
+    if platform == "apple":
+        q = _apple_lookup(url)
+        if q:
+            return _clean_query(q)
+    elif platform == "deezer":
+        q = _deezer_lookup(url)
+        if q:
+            return _clean_query(q)
+
     # ── Strategy 1: oEmbed (Spotify) — public, no auth, returns track name ──
     if platform == "spotify":
         try:
@@ -963,24 +1057,24 @@ def _fetch_drm_metadata(url: str, platform: str) -> str | None:
                 )
                 req2 = urllib.request.Request(emb_url, headers={"User-Agent": "Mozilla/5.0"})
                 with urllib.request.urlopen(req2, timeout=15) as resp2:
-                    page = resp2.read(200_000).decode("utf-8", errors="ignore")
-                m = re.search(r'"artists":\s*\[\s*\{\s*"name"\s*:\s*"([^"]+)"', page)
+                    emb_page = resp2.read(200_000).decode("utf-8", errors="ignore")
+                m = re.search(r'"artists":\s*\[\s*\{\s*"name"\s*:\s*"([^"]+)"', emb_page)
                 if m:
                     artist = m.group(1).strip()
                 if not title:
-                    m2 = re.search(r'"name"\s*:\s*"([^"]+)"', page)
+                    m2 = re.search(r'"name"\s*:\s*"([^"]+)"', emb_page)
                     if m2:
                         title = m2.group(1).strip()
             except Exception as e:  # noqa: BLE001
                 log.debug(f"[music] Spotify embed parse: {e}")
             if artist and title:
-                return f"{artist} - {title}"
+                return _clean_query(f"{artist} - {title}")
             if title:
-                return title
+                return _clean_query(title)
         except Exception as e:  # noqa: BLE001
             log.warning(f"[music] Spotify oEmbed failed: {e}")
 
-    # ── Strategy 2: OpenGraph meta tags from main URL (Deezer / Apple / Tidal) ──
+    # ── Strategy 2: OpenGraph meta tags from main URL (universal fallback) ──
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": (
@@ -992,7 +1086,7 @@ def _fetch_drm_metadata(url: str, platform: str) -> str | None:
             "Accept-Language": "en-US,en;q=0.9",
         })
         with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read(300_000).decode("utf-8", errors="ignore")
+            page = resp.read(300_000).decode("utf-8", errors="ignore")
     except Exception as e:  # noqa: BLE001
         log.warning(f"[music] DRM metadata fetch failed ({platform}): {e}")
         return None
@@ -1001,18 +1095,28 @@ def _fetch_drm_metadata(url: str, platform: str) -> str | None:
         # Match both orderings: property=...content=...  AND  content=...property=...
         m = re.search(
             rf'<meta[^>]+(?:property|name)=["\']{re.escape(prop)}["\'][^>]+content=["\']([^"\']+)["\']',
-            html, re.IGNORECASE,
+            page, re.IGNORECASE,
         )
-        if m:
-            return m.group(1).strip()
-        m = re.search(
-            rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']{re.escape(prop)}["\']',
-            html, re.IGNORECASE,
-        )
-        return m.group(1).strip() if m else ""
+        if not m:
+            m = re.search(
+                rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']{re.escape(prop)}["\']',
+                page, re.IGNORECASE,
+            )
+        return html.unescape(m.group(1).strip()) if m else ""
 
     og_title = _meta("og:title")
     og_desc = _meta("og:description")
+
+    # "TITLE by ARTIST on Apple Music" style titles → 'ARTIST - TITLE'
+    m = re.match(r"^(.+?)\s+by\s+(.+?)\s+on\s+(?:Apple\s*Music|Spotify|Deezer|TIDAL)\b",
+                 og_title, re.IGNORECASE)
+    if m:
+        return _clean_query(f"{m.group(2)} - {m.group(1)}")
+
+    # Tidal & friends already use 'Artist - Title' as og:title — use it as-is
+    if og_title and " - " in og_title:
+        return _clean_query(og_title)
+
     music_musician = _meta("music:musician") or _meta("music:musician_description")
 
     # `music:musician` is often a URL on Deezer — discard it in that case
@@ -1041,13 +1145,15 @@ def _fetch_drm_metadata(url: str, platform: str) -> str | None:
                 generic = re.compile(
                     r"^(?:song|album|track|playlist|ep|single|"
                     r"spotify|deezer|apple\s*music|tidal|"
-                    r"listen\s*to|year)$",
+                    r"listen\s*to|year|duration\b.*)$",
                     re.IGNORECASE,
                 )
                 year_rx = re.compile(r"^\d{4}$")
                 # Split on bullets OR space-dash-space (but not unicode dashes inside names)
                 parts = [p.strip() for p in re.split(r"\s*[·•]\s*|\s+-\s+", og_desc) if p.strip()]
-                parts = [p for p in parts if not generic.match(p) and not year_rx.match(p)]
+                parts = [p for p in parts
+                         if not generic.match(p) and not year_rx.match(p)
+                         and "listen to" not in p.lower()]
                 if parts:
                     artist = parts[0]
 
@@ -1057,9 +1163,9 @@ def _fetch_drm_metadata(url: str, platform: str) -> str | None:
     title = re.sub(r"\s*[-–|]\s*(Spotify|Deezer|Apple Music|Tidal)\s*$", "", title, flags=re.I)
 
     if artist and title:
-        return f"{artist} - {title}"
+        return _clean_query(f"{artist} - {title}")
     if title:
-        return title
+        return _clean_query(title)
     return None
 
 
@@ -1090,18 +1196,20 @@ def _sc_search_sync(query: str) -> list[dict]:
     return results
 
 
-def _music_download_sync(target: str, tmpdir: str, is_search: bool = False) -> dict | None:
+def _music_download_sync(target: str, tmpdir: str) -> dict | None:
     """Download audio from any platform supported by yt-dlp.
 
     `target` can be:
       • a direct URL (SoundCloud / YouTube / Bandcamp / Mixcloud / ...)
-      • a `ytsearch1:` query string (used as fallback for DRM platforms)
+      • a `ytsearch1:` / `scsearch1:` query string (DRM platform fallback)
 
-    Always returns mp3 when ffmpeg is available, otherwise the best progressive audio.
+    Prefers m4a/mp3 so the result is a proper audio file even without ffmpeg;
+    converts to mp3 when ffmpeg is available.
     """
     have_ffmpeg = shutil.which("ffmpeg") is not None
     opts = {
-        "format": "bestaudio[ext=mp3]/bestaudio/best",
+        # m4a/mp3 first → playable audio file even when ffmpeg is missing
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
         "outtmpl": os.path.join(tmpdir, "%(title).80s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
@@ -1124,14 +1232,25 @@ def _music_download_sync(target: str, tmpdir: str, is_search: bool = False) -> d
         info = entries[0] if entries else None
     if not info:
         return None
-    audio_exts = {".mp3", ".m4a", ".opus", ".ogg", ".aac", ".wav", ".flac"}
-    filepath = None
+    audio_exts = {".mp3", ".m4a", ".opus", ".ogg", ".oga", ".aac",
+                  ".wav", ".flac", ".webm", ".mka"}
+    # Some sources (esp. YouTube on restricted IPs) only offer progressive
+    # video containers — the audio inside still plays fine in Telegram.
+    video_exts = {".mp4", ".m4v", ".mov", ".mkv"}
+    audio_files, video_files = [], []
     for name in os.listdir(tmpdir):
-        if os.path.splitext(name)[1].lower() in audio_exts:
-            filepath = os.path.join(tmpdir, name)
-            break
-    if not filepath:
+        if name.endswith((".part", ".ytdl")) or name == "cover.jpg":
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        path = os.path.join(tmpdir, name)
+        if ext in audio_exts:
+            audio_files.append((os.path.getsize(path), path))
+        elif ext in video_exts:
+            video_files.append((os.path.getsize(path), path))
+    candidates = audio_files or video_files
+    if not candidates:
         return None
+    filepath = max(candidates)[1]  # largest matching file
     # Cover art for Telegram audio thumbnail
     thumb_path = None
     thumb_url = info.get("thumbnail") or ""
@@ -1204,7 +1323,9 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
             targets = [f"ytsearch1:{query}"]
             try:
                 sc_results = await asyncio.to_thread(_sc_search_sync, query)
-                targets += [r["url"] for r in sc_results[:3]]
+                # Skip short uploads (often 30s previews/snippets)
+                full = [r for r in sc_results if (r.get("duration") or 0) >= 60]
+                targets += [r["url"] for r in (full or sc_results)[:3]]
             except Exception as e:  # noqa: BLE001
                 log.warning(f"[music] SoundCloud fallback search failed: {e}")
                 targets.append(f"scsearch1:{query}")
@@ -1213,18 +1334,42 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
 
         info = None
         last_err: Exception | None = None
-        for tgt in targets:
-            tmpdir = tempfile.mkdtemp(prefix="bidar_music_")
-            try:
-                info = await asyncio.to_thread(_music_download_sync, tgt, tmpdir)
-            except Exception as e:  # noqa: BLE001
-                last_err = e
-                log.warning(f"[music] download failed for target `{tgt[:80]}`: {e}")
-                info = None
-            if info:
-                break
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            tmpdir = None
+
+        async def _try_targets(tgts) -> dict | None:
+            nonlocal tmpdir, last_err
+            for tgt in tgts:
+                tmpdir = tempfile.mkdtemp(prefix="bidar_music_")
+                try:
+                    got = await asyncio.to_thread(_music_download_sync, tgt, tmpdir)
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+                    log.warning(f"[music] download failed for target `{tgt[:80]}`: {e}")
+                    got = None
+                if got:
+                    return got
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                tmpdir = None
+            return None
+
+        info = await _try_targets(targets)
+
+        # Direct YouTube/YT-Music links often can't be downloaded from server
+        # IPs (403 / video-only). Resolve the title via oEmbed and look for the
+        # same track on SoundCloud instead.
+        if not info and platform == "youtube":
+            query = await asyncio.to_thread(_youtube_title_query, url)
+            if query:
+                log.info(f"[music] YouTube blocked → SoundCloud fallback: {query}")
+                try:
+                    sc_results = await asyncio.to_thread(_sc_search_sync, query)
+                    # Skip short uploads (often 30s previews/snippets)
+                    full = [r for r in sc_results if (r.get("duration") or 0) >= 60]
+                    fb_targets = [r["url"] for r in (full or sc_results)[:3]]
+                except Exception as e:  # noqa: BLE001
+                    log.warning(f"[music] SoundCloud fallback search failed: {e}")
+                    fb_targets = [f"scsearch1:{query}"]
+                if fb_targets:
+                    info = await _try_targets(fb_targets)
 
         if not info:
             err = str(last_err)[:200] if last_err else "no audio found"
@@ -2500,6 +2645,10 @@ async def main():
     me = await client.get_me()
     OWNER_ID = me.id
     log.info(f"✅ Logged in: {me.first_name} (@{me.username}) — id={me.id}")
+
+    if shutil.which("ffmpeg") is None:
+        log.warning("⚠️ ffmpeg not found — music downloads may fail or skip MP3 "
+                    "conversion. Install it: sudo apt install -y ffmpeg")
 
     ready, err_msg = _ai_ready()
     ai_info = f"🟢 ready ({config['ai_model']})" if ready else f"🔴 {err_msg}"

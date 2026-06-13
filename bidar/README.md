@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.9.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.9.2-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -320,12 +320,14 @@ sudo systemctl enable --now bidar
 | 🎵 **Bandcamp** | مستقیم |
 | 🎚 **Mixcloud** | مستقیم |
 | 🎶 **Yandex Music** | مستقیم |
-| 🟢 **Spotify** | استخراج خودکار اسم آهنگ + خواننده، سپس دانلود از یوتیوب/ساندکلاد |
-| 🟣 **Deezer** | استخراج خودکار + دانلود از یوتیوب/ساندکلاد |
-| 🍎 **Apple Music** | استخراج خودکار + دانلود از یوتیوب/ساندکلاد |
-| 🌊 **Tidal** | استخراج خودکار + دانلود از یوتیوب/ساندکلاد |
+| 🟢 **Spotify** | استخراج خودکار اسم آهنگ + خواننده (oEmbed رسمی)، سپس دانلود از یوتیوب/ساندکلاد |
+| 🟣 **Deezer** | شناسایی با **API رسمی Deezer**، سپس دانلود از یوتیوب/ساندکلاد |
+| 🍎 **Apple Music** | شناسایی با **API رسمی iTunes** (لینک آهنگ و آلبوم `?i=`)، سپس دانلود از یوتیوب/ساندکلاد |
+| 🌊 **Tidal** | استخراج متادیتا از صفحه، سپس دانلود از یوتیوب/ساندکلاد |
 
 > 💡 پلتفرم‌های دارای DRM (اسپاتیفای، دیزر و …) به‌دلیل محافظت قانونی فایل اصلی قابل دانلود نیستن. بیدار خودکار اسم و خواننده رو از لینک می‌گیره و معادلش رو اول از یوتیوب و اگه یوتیوب در دسترس نبود (مثلاً IP سرور بلاک شده باشه) از بین چند نتیجه برتر ساندکلاد پیدا و دانلود می‌کنه.
+>
+> ▶️ حتی لینک‌های **مستقیم یوتیوب/یوتیوب‌موزیک** هم اگه روی سرور بلاک باشن، خودکار اسم آهنگ از oEmbed گرفته می‌شه و از ساندکلاد دانلود می‌شه.
 >
 > 🔗 لینک‌های کوتاه share هم پشتیبانی میشن: `on.soundcloud.com`، `spotify.link`، `deezer.page.link`
 

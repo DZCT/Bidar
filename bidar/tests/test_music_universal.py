@@ -463,5 +463,117 @@ class TestAutoDetectV191(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(count["n"], 2)
 
 
+# ────────────────────────────────────────────────────────────────────
+# 7. v1.9.2: metadata APIs (iTunes/Deezer), query cleaner, YT oEmbed fallback
+# ────────────────────────────────────────────────────────────────────
+class TestCleanQuery(unittest.TestCase):
+    def test_unescape_and_nbsp(self):
+        self.assertEqual(bidar._clean_query("Let&#39;s Go on Apple\xa0Music"),
+                         "Let's Go on Apple Music")
+
+    def test_strips_official_video(self):
+        self.assertEqual(bidar._clean_query("Artist - Song (Official Video)"), "Artist - Song")
+        self.assertEqual(bidar._clean_query("Artist - Song [Official Lyric Video]"), "Artist - Song")
+
+    def test_strips_single_suffix(self):
+        self.assertEqual(bidar._clean_query("The Weeknd - Blinding Lights - Single"),
+                         "The Weeknd - Blinding Lights")
+
+
+class TestPlatformLookups(unittest.TestCase):
+    def test_apple_lookup_uses_i_param(self):
+        calls = []
+
+        def fake_json(url, timeout=15):
+            calls.append(url)
+            return {"results": [{"artistName": "Joost", "trackName": "Europapa"}]}
+
+        with patch.object(bidar, "_http_json", side_effect=fake_json):
+            q = bidar._apple_lookup("https://music.apple.com/us/album/europapa/1732041797?i=1732041802")
+        self.assertEqual(q, "Joost - Europapa")
+        self.assertIn("id=1732041802", calls[0])
+        self.assertIn("country=us", calls[0])
+
+    def test_apple_lookup_song_path_id(self):
+        def fake_json(url, timeout=15):
+            return {"results": [{"artistName": "Joost", "trackName": "Europapa"}]}
+
+        with patch.object(bidar, "_http_json", side_effect=fake_json):
+            q = bidar._apple_lookup("https://music.apple.com/us/song/europapa/1732041802")
+        self.assertEqual(q, "Joost - Europapa")
+
+    def test_apple_lookup_dead_link_returns_none(self):
+        with patch.object(bidar, "_http_json", return_value={"resultCount": 0, "results": []}):
+            q = bidar._apple_lookup("https://music.apple.com/us/album/x/1499385311?i=1499385316")
+        self.assertIsNone(q)
+
+    def test_deezer_lookup(self):
+        def fake_json(url, timeout=15):
+            assert "api.deezer.com/track/3135556" in url
+            return {"title": "Harder, Better, Faster, Stronger", "artist": {"name": "Daft Punk"}}
+
+        with patch.object(bidar, "_http_json", side_effect=fake_json):
+            q = bidar._deezer_lookup("https://www.deezer.com/track/3135556")
+        self.assertEqual(q, "Daft Punk - Harder, Better, Faster, Stronger")
+
+    def test_youtube_title_query_strips_topic(self):
+        with patch.object(bidar, "_http_json",
+                          return_value={"title": "Barbie (Remix)", "author_name": "JaidynAlexis - Topic"}):
+            q = bidar._youtube_title_query("https://music.youtube.com/watch?v=x")
+        self.assertEqual(q, "JaidynAlexis - Barbie (Remix)")
+
+    def test_youtube_title_author_already_in_title(self):
+        with patch.object(bidar, "_http_json",
+                          return_value={"title": "Joost - Europapa", "author_name": "Joost"}):
+            q = bidar._youtube_title_query("https://youtu.be/x")
+        self.assertEqual(q, "Joost - Europapa")
+
+    def test_fetch_drm_uses_apple_api_first(self):
+        with patch.object(bidar, "_apple_lookup", return_value="Joost - Europapa") as al:
+            q = bidar._fetch_drm_metadata("https://music.apple.com/us/song/europapa/1732041802", "apple")
+        self.assertEqual(q, "Joost - Europapa")
+        al.assert_called_once()
+
+
+class TestDownloadSyncVideoFallback(unittest.TestCase):
+    def test_mp4_used_when_no_audio_file(self):
+        import tempfile as _tf
+        tmp = _tf.mkdtemp()
+        try:
+            with open(os.path.join(tmp, "Song.mp4"), "wb") as f:
+                f.write(b"0" * 100)
+            fake = MagicMock()
+            ydl = MagicMock()
+            ydl.extract_info.return_value = {"title": "Song", "uploader": "X",
+                                             "duration": 100, "thumbnail": ""}
+            fake.YoutubeDL.return_value.__enter__ = MagicMock(return_value=ydl)
+            fake.YoutubeDL.return_value.__exit__ = MagicMock(return_value=False)
+            with patch.object(bidar, "yt_dlp", fake):
+                out = bidar._music_download_sync("https://youtube.com/watch?v=x", tmp)
+            self.assertIsNotNone(out)
+            self.assertTrue(out["filepath"].endswith(".mp4"))
+        finally:
+            import shutil as _sh
+            _sh.rmtree(tmp, ignore_errors=True)
+
+    def test_part_files_ignored(self):
+        import tempfile as _tf
+        tmp = _tf.mkdtemp()
+        try:
+            with open(os.path.join(tmp, "Song.mp3.part"), "wb") as f:
+                f.write(b"0" * 100)
+            fake = MagicMock()
+            ydl = MagicMock()
+            ydl.extract_info.return_value = {"title": "Song"}
+            fake.YoutubeDL.return_value.__enter__ = MagicMock(return_value=ydl)
+            fake.YoutubeDL.return_value.__exit__ = MagicMock(return_value=False)
+            with patch.object(bidar, "yt_dlp", fake):
+                out = bidar._music_download_sync("https://soundcloud.com/x/y", tmp)
+            self.assertIsNone(out)
+        finally:
+            import shutil as _sh
+            _sh.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

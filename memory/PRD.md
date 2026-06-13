@@ -1,4 +1,4 @@
-# PRD — Bidar v1.9.1 (Always Online Telegram Userbot + AI Assistant)
+# PRD — Bidar v1.9.2 (Always Online Telegram Userbot + AI Assistant)
 
 ## Problem Statement
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
@@ -105,6 +105,21 @@ User-reported bugs (with screenshots) — all fixed & E2E verified:
 - ✅ Removed dead `_SC_URL_RE`; tests migrated to `_detect_music_url`.
 - ✅ Tests: 47 passing (22 new in `test_music_universal.py` for shortlinks, chat-ID variants, outgoing flow, dedup-retry).
 
+### v1.9.2 — Tidal / Apple Music / YouTube Music Fixes (Completed Jun 2026)
+User-reported (screenshots): Tidal, Apple Music & YouTube Music all returned "no audio found" / "Couldn't read track info".
+Root causes & fixes — all live E2E verified with the user's exact URLs:
+- ✅ **Garbage DRM search queries**: Apple OG parse produced `'Duration 2:40 - Europapa by Joost on Apple Music'`, Tidal produced un-unescaped `'Listen to Let&#39;s... - Marvin Gaye - ...'` → both searches found nothing → "no audio found".
+  - Apple → now resolved via official **iTunes Lookup API** (`?i=` param then path ID, with country) → `Joost - Europapa`
+  - Deezer → official **Deezer API** (`api.deezer.com/track/{id}`)
+  - Tidal/universal OG fallback → `html.unescape`, "TITLE by ARTIST on PLATFORM" og:title parsing, 'Artist - Title' og:title passthrough, junk filters (duration/listen-to)
+  - New `_clean_query()` — strips `(Official Video)`, `- Single`, `\xa0`, HTML entities
+- ✅ **`_music_download_sync` v1.9.1 edit had silently not landed** (parallel write race) — re-applied & verified: m4a/mp3 format preference, broader audio exts, largest-file pick, `.part` skip, **video-container (.mp4) last resort** (YouTube on restricted IPs may only offer progressive mp4 → previously "no audio found").
+- ✅ **Direct YouTube/YT-Music links** blocked on server IPs → new fallback: title via **YouTube oEmbed** (works even when downloads are 403'd) → top-3 SoundCloud results.
+- ✅ SC fallback now **skips uploads shorter than 60s** (30s Go+ previews snuck through as tiny files).
+- ✅ Startup warning when ffmpeg is missing.
+- ✅ NOTE: user's Apple album test link `…/blinding-lights/1499385311?i=1499385316` is a **dead link (HTTP 404, removed from catalog)** — correctly reports "Couldn't read track info"; valid album links with `?i=` now work.
+- ✅ Tests: **59 passing** (12 new: clean-query, iTunes/Deezer/oEmbed lookups mocked, mp4 fallback, .part skip).
+
 ## Commands Summary (v1.9.1)
 **Total: 33+ commands**, all `@owner_only`
 
@@ -150,18 +165,21 @@ bash <(curl -fsSL -H "Authorization: token $GH_TOKEN" \
   https://raw.githubusercontent.com/DZCT/Bidar/main/bidar/install.sh)
 ```
 
-## Test Results (Feb 2026 — v1.9.0)
-✅ Syntax check passes (py_compile + lint clean)
-✅ `tests/test_search.py` — all passing
-✅ `tests/test_soundcloud.py` — 48 checks passing (legacy + new universal helpers)
-✅ `tests/test_music_universal.py` — 25 tests passing (URL detection, DRM metadata, allow-list, auto-detect flow, dedup, i18n)
-✅ Real E2E: Spotify oEmbed/embed parser → "The Weeknd - Blinding Lights" / "Ed Sheeran - Shape of You"; Deezer OG parser → "Eminem - Drips"
-✅ yt-dlp ytsearch1 fallback verified end-to-end on YouTube
+## Test Results (Jun 2026 — v1.9.2)
+✅ Syntax check passes (py_compile)
+✅ `pytest tests/` — **59 passing** (test_search + test_soundcloud + test_music_universal; incl. v1.9.1 whitelist/shortlink tests and 12 new v1.9.2 tests: clean-query, iTunes/Deezer/YT-oEmbed lookups, mp4 fallback, .part skip)
+✅ Real E2E (user's exact URLs, YouTube fully blocked in test env):
+  - `on.soundcloud.com/aquUJP…` shortlink → 19MB mp3 downloaded
+  - Spotify Europapa → oEmbed → SC #1 DRM skipped → SC #2 mp3 sent
+  - Apple song & album(?i=) → iTunes API → "Joost - Europapa" → audio sent
+  - Tidal → "Marvin Gaye - Let's Get It On" → full-length m4a sent (≥60s filter)
+  - YouTube Music watch URL → oEmbed → SC fallback → m4a sent
+  - Dead Apple link (404) → clean "Couldn't read track info" message
+✅ Whitelist variants: raw `.id` style `2453861964` matches chat `-1002453861964`
 
 ## Next Action Items
-- User to run `bash update.sh` on VPS to deploy v1.9.0
-- Test in Telegram: `.sc <spotify-link>`, `.sc <apple-music-link>`, then send a link in PV to verify auto-detect, then `.allow here` in a group + send link to verify whitelist
-- "Save to GitHub" to push v1.9.0 to `DZCT/Bidar`
+- User: "Save to GitHub" then `bash update.sh` on VPS to deploy v1.9.2
+- User verify in Telegram: Tidal / Apple Music / YouTube Music links in PV & allowed groups
 
 ## Backlog (Prioritized)
 ### P1
