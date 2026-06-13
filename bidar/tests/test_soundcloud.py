@@ -98,7 +98,7 @@ def test_search_sync():
 
 
 def test_download_sync(tmpdir_base="/tmp/bidar_sc_unittest"):
-    print("\n── _sc_download_sync (mocked yt-dlp) ──")
+    print("\n── _music_download_sync (mocked yt-dlp) ──")
     import shutil as _sh
     _sh.rmtree(tmpdir_base, ignore_errors=True)
     os.makedirs(tmpdir_base)
@@ -115,7 +115,7 @@ def test_download_sync(tmpdir_base="/tmp/bidar_sc_unittest"):
 
     ydl.extract_info.side_effect = write_file
     with patch.object(bidar, "yt_dlp", fake):
-        out = bidar._sc_download_sync("https://soundcloud.com/x/y", tmpdir_base)
+        out = bidar._music_download_sync("https://soundcloud.com/x/y", tmpdir_base)
     check("returns dict", out is not None)
     check("filepath found", out and out["filepath"] == audio_file)
     check("duration int", out and out["duration"] == 181)
@@ -125,7 +125,7 @@ def test_download_sync(tmpdir_base="/tmp/bidar_sc_unittest"):
     fake2, ydl2 = _fake_ydl({"entries": [info]})
     ydl2.extract_info.side_effect = write_file
     with patch.object(bidar, "yt_dlp", fake2):
-        out2 = bidar._sc_download_sync("https://soundcloud.com/x/sets/y", tmpdir_base)
+        out2 = bidar._music_download_sync("https://soundcloud.com/x/sets/y", tmpdir_base)
     check("playlist → first entry", out2 is not None and out2["title"] == "My Song")
 
     # no audio file produced → None
@@ -133,7 +133,7 @@ def test_download_sync(tmpdir_base="/tmp/bidar_sc_unittest"):
     os.makedirs(tmpdir_base)
     fake3, ydl3 = _fake_ydl(info)  # extract_info returns info but writes nothing
     with patch.object(bidar, "yt_dlp", fake3):
-        out3 = bidar._sc_download_sync("https://soundcloud.com/x/y", tmpdir_base)
+        out3 = bidar._music_download_sync("https://soundcloud.com/x/y", tmpdir_base)
     check("no file → None", out3 is None)
     _sh.rmtree(tmpdir_base, ignore_errors=True)
 
@@ -168,10 +168,12 @@ def test_results_state():
 
 def test_i18n_keys():
     print("\n── i18n keys (en + fa present) ──")
-    keys = ["sc_usage", "sc_lib_missing", "sc_searching", "sc_no_results",
-            "sc_results", "sc_no_pending", "sc_invalid_pick", "sc_downloading",
-            "sc_uploading", "sc_failed", "sc_caption"]
-    for k in keys:
+    # Legacy sc_ keys that remain (search-related)
+    legacy_keys = ["sc_usage", "sc_lib_missing", "sc_searching", "sc_no_results",
+                   "sc_results", "sc_no_pending", "sc_invalid_pick"]
+    # New universal music keys
+    music_keys = ["music_downloading", "music_uploading", "music_failed", "music_caption"]
+    for k in legacy_keys + music_keys:
         entry = bidar.I18N.get(k, {})
         check(k, bool(entry.get("en")) and bool(entry.get("fa")))
     # help mentions .sc in both languages

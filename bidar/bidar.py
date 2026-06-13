@@ -6,7 +6,8 @@ Features:
   • Always-online (UpdateStatusRequest periodic)
   • Static & AI-powered auto-reply with per-chat context
   • Image generation, editing, OCR via Gemini
-  • SoundCloud music download (.sc — link / search / pick)
+  • Universal music downloader (.sc — SoundCloud / YouTube / Spotify / Deezer / Apple Music / Tidal / Bandcamp ...)
+  • Auto-detect music links in private chats & whitelisted groups
   • Translation (.tl, .to)
   • Bilingual UI (English + Persian) — switchable at runtime
   • Owner-only command lock with double safety check
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import json
 import logging
 import os
@@ -26,6 +28,7 @@ import re
 import shutil
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -62,7 +65,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -105,14 +108,19 @@ _DEFAULT_CONFIG = {
     "image_model": "gemini-3.1-flash-image-preview",
     # UI language
     "bot_lang": "en",  # "en" or "fa"
+    # Music (auto-detect & download from any platform)
+    "music_enabled": True,
+    # Whitelist of group/channel chat IDs where AI replies & music auto-detect are allowed.
+    # Private chats are always allowed (independent of this list).
+    "allowed_groups": [],
 }
 
-config: dict = dict(_DEFAULT_CONFIG)
+config: dict = copy.deepcopy(_DEFAULT_CONFIG)
 
 
 def load_config() -> None:
     global config
-    base = dict(_DEFAULT_CONFIG)
+    base = copy.deepcopy(_DEFAULT_CONFIG)
     if CONFIG_FILE.exists():
         try:
             base.update(json.loads(CONFIG_FILE.read_text(encoding="utf-8")))
@@ -142,6 +150,7 @@ stats = {
 }
 _chat_sessions: dict[str, object] = {}
 _sc_results: dict[int, list[dict]] = {}  # per-chat last SoundCloud search results
+_music_recent: dict[str, float] = {}  # dedup: chat_id|url → timestamp
 
 # ───────────────────────── Logging ─────────────────────────
 logging.basicConfig(
@@ -219,8 +228,8 @@ I18N = {
         "fa": "🤖 **دستیار AI: {state}**\n\n📚 مدل: `{model}`\n💬 در گروه‌ها: `{groups}`\n\nℹ️ در چت خصوصی، وقتی پاسخ خودکار روشن باشه، AI پاسخ میده.",
     },
     "aigroups_set": {
-        "en": "💬 **AI in groups: {state}**\n\nℹ️ In groups, AI only replies when:\n  • Someone replies to your message\n  • Someone mentions you with @username\n\n🧠 Group conversation memory is preserved (until reset).",
-        "fa": "💬 **AI در گروه‌ها: {state}**\n\nℹ️ در گروه فقط وقتی پاسخ میده که:\n  • کسی بهت reply بزنه\n  • کسی با @username منشنت کنه\n\n🧠 حافظه مکالمه گروه حفظ میشه (تا ریست کنی).",
+        "en": "💬 **AI in groups: {state}**\n\nℹ️ In groups, AI only replies when:\n  • The group is in the allowed list (`{p}allow list`)\n  • AND someone replies to your message or mentions you with @username\n\n🧠 Group conversation memory is preserved (until reset).",
+        "fa": "💬 **AI در گروه‌ها: {state}**\n\nℹ️ در گروه فقط وقتی پاسخ میده که:\n  • گروه در لیست مجاز باشه (`{p}allow list`)\n  • و کسی روی پیامت ریپلای بزنه یا با @username منشنت کنه\n\n🧠 حافظه مکالمه گروه حفظ میشه (تا ریست کنی).",
     },
     "personality_show": {
         "en": "🎭 **Current AI Personality:**\n\n`{p}`\n\nTo change: `{prefix}personality <new text>`\nTo reset: `{prefix}personality reset`",
@@ -423,8 +432,8 @@ I18N = {
 
     # SoundCloud
     "sc_usage": {
-        "en": "🎵 **SoundCloud Downloader**\n\n  `{p}sc <link>` — download track from link\n  `{p}sc <song name>` — search SoundCloud (top 5 results)\n  `{p}sc <1-5>` — download from last search results\n\n📝 Examples:\n  `{p}sc https://soundcloud.com/artist/track`\n  `{p}sc shadmehr aghili setareh`\n  `{p}sc 2`",
-        "fa": "🎵 **دانلود از ساندکلاد**\n\n  `{p}sc <لینک>` — دانلود مستقیم آهنگ از لینک\n  `{p}sc <اسم آهنگ>` — جستجو در ساندکلاد (۵ نتیجه اول)\n  `{p}sc <۱ تا ۵>` — دانلود از نتایج جستجوی قبلی\n\n📝 مثال:\n  `{p}sc https://soundcloud.com/artist/track`\n  `{p}sc شادمهر عقیلی ستاره`\n  `{p}sc 2`",
+        "en": "🎵 **Universal Music Downloader**\n\n  `{p}sc <link>` — download from **any** music platform link\n     Supported: SoundCloud · YouTube · YouTube Music · Spotify · Deezer · Apple Music · Tidal · Bandcamp · Mixcloud · Yandex\n  `{p}sc <song name>` — search **SoundCloud** (top 5 results)\n  `{p}sc <1-5>` — download from last search results\n\n📝 Examples:\n  `{p}sc https://open.spotify.com/track/...`\n  `{p}sc https://music.apple.com/.../song/...`\n  `{p}sc shadmehr aghili setareh`\n\n🤖 Auto-detect is ON for **private chats** and any group in `{p}allow list`.",
+        "fa": "🎵 **دانلودر موزیک از همه پلتفرم‌ها**\n\n  `{p}sc <لینک>` — دانلود از **هر** لینک موسیقی\n     پشتیبانی: ساندکلاد · یوتیوب · YouTube Music · اسپاتیفای · دیزر · اپل موزیک · تایدال · Bandcamp · Mixcloud · یاندکس\n  `{p}sc <اسم آهنگ>` — جستجو در **ساندکلاد** (۵ نتیجه)\n  `{p}sc <۱ تا ۵>` — دانلود از نتایج جستجوی قبلی\n\n📝 مثال:\n  `{p}sc https://open.spotify.com/track/...`\n  `{p}sc https://music.apple.com/.../song/...`\n  `{p}sc شادمهر عقیلی ستاره`\n\n🤖 تشخیص خودکار در **پی‌وی** و گروه‌های موجود در `{p}allow list` فعاله.",
     },
     "sc_lib_missing": {
         "en": "❌ `yt-dlp` is not installed.\n\n🔧 Install it:\n  `pip install yt-dlp`\nThen restart the bot.",
@@ -441,10 +450,36 @@ I18N = {
         "fa": "❌ نتیجه جستجوی قبلی توی این چت وجود نداره. اول جستجو کن:\n`{p}sc <اسم آهنگ>`",
     },
     "sc_invalid_pick": {"en": "⚠️ Pick a number between 1 and {n}.", "fa": "⚠️ یه عدد بین ۱ تا {n} انتخاب کن."},
-    "sc_downloading": {"en": "🎵 Downloading from SoundCloud...", "fa": "🎵 در حال دانلود از ساندکلاد..."},
-    "sc_uploading": {"en": "📤 Uploading: _{title}_ ...", "fa": "📤 در حال آپلود: _{title}_ ..."},
-    "sc_failed": {"en": "❌ Download failed: `{e}`", "fa": "❌ دانلود ناموفق بود: `{e}`"},
-    "sc_caption": {"en": "🎵 **{title}**\n👤 {artist}\n☁️ SoundCloud", "fa": "🎵 **{title}**\n👤 {artist}\n☁️ ساندکلاد"},
+
+    # Universal Music Downloader
+    "music_downloading": {"en": "🎵 Downloading from {platform}...", "fa": "🎵 در حال دانلود از {platform}..."},
+    "music_resolving":   {"en": "🔎 Resolving track from {platform} (DRM bypass via YouTube)...",
+                          "fa": "🔎 شناسایی آهنگ از {platform} (به دلیل DRM، از یوتیوب می‌گیرم)..."},
+    "music_uploading":   {"en": "📤 Uploading: _{title}_ ...", "fa": "📤 در حال آپلود: _{title}_ ..."},
+    "music_failed":      {"en": "❌ {platform} download failed: `{e}`", "fa": "❌ دانلود از {platform} ناموفق بود: `{e}`"},
+    "music_caption":     {"en": "🎵 **{title}**\n👤 {artist}\n☁️ {platform}",
+                          "fa": "🎵 **{title}**\n👤 {artist}\n☁️ {platform}"},
+
+    # Music auto-detect toggle
+    "music_set": {
+        "en": "🎵 **Music auto-detect: {state}**\n\nℹ️ When ON, any music link sent in a private chat or whitelisted group is downloaded and replied as audio automatically.\n  • Private chats: always active\n  • Groups: only those in `{p}allow list`\n\nTo manage allowed groups: `{p}allow help`",
+        "fa": "🎵 **تشخیص خودکار موزیک: {state}**\n\nℹ️ وقتی روشن باشه، هر لینک موسیقی که در پی‌وی یا گروه‌های مجاز فرستاده بشه، خودکار دانلود و به صورت فایل صوتی ریپلای میشه.\n  • پی‌وی: همیشه فعال\n  • گروه‌ها: فقط اونایی که در `{p}allow list` هستن\n\nمدیریت گروه‌های مجاز: `{p}allow help`",
+    },
+
+    # Allow list (unified whitelist for AI + Music in groups)
+    "allow_help": {
+        "en": "📋 **Allowed Groups (unified whitelist for AI + Music)**\n\n  `{p}allow add <chat_id>` — add a group\n  `{p}allow here` — add the **current** chat\n  `{p}allow remove <chat_id>` — remove a group\n  `{p}allow rmhere` — remove the **current** chat\n  `{p}allow list` — show all allowed groups\n  `{p}allow clear` — clear the list\n\n💡 Get a chat ID with `{p}id` inside the group.\n\nℹ️ This list controls **both**:\n  • AI replies in groups (requires `{p}aigroups on`)\n  • Music link auto-detect in groups (requires `{p}music on`)\n\nPrivate chats are always allowed and independent of this list.",
+        "fa": "📋 **گروه‌های مجاز (لیست یکپارچه برای AI و موزیک)**\n\n  `{p}allow add <chat_id>` — اضافه کردن یه گروه\n  `{p}allow here` — اضافه کردن **همین** چت\n  `{p}allow remove <chat_id>` — حذف یه گروه\n  `{p}allow rmhere` — حذف **همین** چت\n  `{p}allow list` — نمایش لیست\n  `{p}allow clear` — پاک کردن همه\n\n💡 برای گرفتن chat ID داخل گروه دستور `{p}id` رو بزن.\n\nℹ️ این لیست **هم‌زمان** کنترل می‌کنه:\n  • پاسخ AI در گروه‌ها (نیازمند `{p}aigroups on`)\n  • تشخیص خودکار لینک موزیک در گروه‌ها (نیازمند `{p}music on`)\n\nچت‌های خصوصی همیشه مجازن و به این لیست بستگی ندارن.",
+    },
+    "allow_added":   {"en": "✅ Added `{cid}` to allowed groups. ({n} total)", "fa": "✅ `{cid}` به گروه‌های مجاز اضافه شد. (مجموع: {n})"},
+    "allow_exists":  {"en": "ℹ️ `{cid}` is already in the allowed groups list.", "fa": "ℹ️ `{cid}` از قبل در لیست مجاز هست."},
+    "allow_removed": {"en": "✅ Removed `{cid}` from allowed groups. ({n} left)", "fa": "✅ `{cid}` از لیست مجاز حذف شد. (باقی‌مونده: {n})"},
+    "allow_notfound":{"en": "⚠️ `{cid}` is not in the allowed groups list.", "fa": "⚠️ `{cid}` در لیست مجاز نیست."},
+    "allow_invalid": {"en": "⚠️ Invalid chat ID. Use a numeric ID (e.g., `-1001234567890`).", "fa": "⚠️ chat ID معتبر نیست. باید عددی باشه (مثلاً `-1001234567890`)."},
+    "allow_list_empty": {"en": "📋 Allowed groups list is **empty**.\n\nAdd one with `{p}allow add <chat_id>` or `{p}allow here`.", "fa": "📋 لیست گروه‌های مجاز **خالیه**.\n\nبا `{p}allow add <chat_id>` یا `{p}allow here` اضافه کن."},
+    "allow_list_title": {"en": "📋 **Allowed Groups** ({n}):\n\n{list}\n\nRemove with `{p}allow remove <chat_id>`", "fa": "📋 **گروه‌های مجاز** ({n}):\n\n{list}\n\nحذف با `{p}allow remove <chat_id>`"},
+    "allow_cleared": {"en": "🗑 Cleared {n} group(s) from allowed list.", "fa": "🗑 {n} گروه از لیست مجاز پاک شد."},
+    "allow_here_pv": {"en": "ℹ️ This is a private chat — private chats are always allowed.", "fa": "ℹ️ اینجا یه چت خصوصیه — چت‌های خصوصی همیشه مجازن."},
 
     # Help — full text (long)
     "help_full": {
@@ -481,9 +516,12 @@ I18N = {
             "🔎 **Search**\n"
             "  `{p}search <query>` — search normal chats → saves .txt file\n"
             "  `{p}searchall <query>` — search **only** restricted/blocked channels\n\n"
-            "🎵 **Music (SoundCloud)**\n"
-            "  `{p}sc <link>` — download track from link\n"
-            "  `{p}sc <name>` — search (top 5) → pick with `{p}sc <num>`\n\n"
+            "🎵 **Music (Universal Downloader)**\n"
+            "  `{p}sc <link>` — download from **any** music platform link\n"
+            "     (SoundCloud / YouTube / Spotify / Deezer / Apple Music / Tidal / Bandcamp ...)\n"
+            "  `{p}sc <name>` — search SoundCloud (top 5) → pick with `{p}sc <num>`\n"
+            "  `{p}music on|off` — toggle **auto-detect** of music links in chats\n"
+            "  `{p}allow help` — manage groups allowed for AI & music auto-detect\n\n"
             "📊 **Info**\n"
             "  `{p}alive` — health check\n"
             "  `{p}ping` — latency test\n"
@@ -529,9 +567,12 @@ I18N = {
             "🔎 **جستجو**\n"
             "  `{p}search <متن>` — جستجو در چت‌های عادی → فایل .txt میده\n"
             "  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های محدود/مسدود\n\n"
-            "🎵 **موزیک (ساندکلاد)**\n"
-            "  `{p}sc <لینک>` — دانلود آهنگ از لینک\n"
-            "  `{p}sc <اسم>` — جستجو (۵ نتیجه) → انتخاب با `{p}sc <شماره>`\n\n"
+            "🎵 **موزیک (دانلودر جامع)**\n"
+            "  `{p}sc <لینک>` — دانلود از **هر** لینک موسیقی\n"
+            "     (ساندکلاد / یوتیوب / اسپاتیفای / دیزر / اپل موزیک / تایدال / Bandcamp ...)\n"
+            "  `{p}sc <اسم>` — جستجو در ساندکلاد (۵ نتیجه) → انتخاب با `{p}sc <شماره>`\n"
+            "  `{p}music on|off` — روشن/خاموش کردن **تشخیص خودکار** لینک موزیک\n"
+            "  `{p}allow help` — مدیریت گروه‌های مجاز برای AI و دانلود خودکار\n\n"
             "📊 **اطلاعات**\n"
             "  `{p}alive` — چک زنده بودن ربات\n"
             "  `{p}ping` — تست تاخیر (ms)\n"
@@ -768,8 +809,50 @@ async def _ocr_image(image_bytes: bytes) -> str | None:
         return None
 
 
-# ────────── SoundCloud Helpers ──────────
+# ────────── Music Helpers (Universal Downloader) ──────────
 _SC_URL_RE = re.compile(r"https?://(?:[\w.-]+\.)?(?:soundcloud\.com|snd\.sc)/\S+", re.IGNORECASE)
+
+# Platform detection patterns. Order matters — first match wins.
+_MUSIC_PLATFORMS: list[tuple[str, re.Pattern, bool]] = [
+    # (name, regex, is_drm_protected)
+    ("youtube",   re.compile(r"https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?[^\s]*v=|shorts/|playlist\?list=)|youtu\.be/)[\w\-]+(?:[?&][^\s]*)?", re.I), False),
+    ("soundcloud",re.compile(r"https?://(?:(?:www|m)\.)?(?:soundcloud\.com|snd\.sc)/[\w\-/?=&%.#]+", re.I), False),
+    ("bandcamp",  re.compile(r"https?://[\w\-]+\.bandcamp\.com/(?:track|album)/[\w\-]+", re.I), False),
+    ("mixcloud",  re.compile(r"https?://(?:www\.)?mixcloud\.com/[\w\-]+/[\w\-]+/?", re.I), False),
+    ("vimeo",     re.compile(r"https?://(?:www\.)?vimeo\.com/\d+", re.I), False),
+    ("yandex",    re.compile(r"https?://music\.yandex\.\w+/album/\d+/track/\d+", re.I), False),
+    # DRM-protected (download via YouTube fallback)
+    ("spotify",   re.compile(r"https?://open\.spotify\.com/(?:intl-\w+/)?track/[\w]+", re.I), True),
+    ("deezer",    re.compile(r"https?://(?:www\.)?deezer\.com/(?:\w+/)?track/\d+", re.I), True),
+    ("apple",     re.compile(r"https?://music\.apple\.com/[\w\-/]+/(?:song|album)/[^\s?]+(?:\?i=\d+)?", re.I), True),
+    ("tidal",     re.compile(r"https?://(?:(?:listen|www)\.)?tidal\.com/(?:browse/)?track/\d+", re.I), True),
+]
+
+_PLATFORM_LABEL = {
+    "youtube": "YouTube",
+    "soundcloud": "SoundCloud",
+    "bandcamp": "Bandcamp",
+    "mixcloud": "Mixcloud",
+    "vimeo": "Vimeo",
+    "yandex": "Yandex Music",
+    "spotify": "Spotify",
+    "deezer": "Deezer",
+    "apple": "Apple Music",
+    "tidal": "Tidal",
+}
+
+
+def _detect_music_url(text: str) -> tuple[str, str, bool] | None:
+    """Scan text for the first known music URL.
+    Returns (platform_name, url, is_drm) or None.
+    """
+    if not text:
+        return None
+    for name, rx, is_drm in _MUSIC_PLATFORMS:
+        m = rx.search(text)
+        if m:
+            return name, m.group(0), is_drm
+    return None
 
 
 def _fmt_duration(seconds) -> str:
@@ -782,6 +865,132 @@ def _fmt_duration(seconds) -> str:
     if h:
         return f"{h}:{m:02d}:{s:02d}"
     return f"{m}:{s:02d}"
+
+
+def _fetch_drm_metadata(url: str, platform: str) -> str | None:
+    """For DRM-protected platforms (Spotify, Deezer, Apple Music, Tidal),
+    fetch track metadata and return a search query of the form 'Artist - Title'.
+    Returns None on failure.
+
+    Uses public oEmbed / embed endpoints where available (bot-friendly), with
+    OpenGraph meta parsing as a fallback.
+    """
+    # ── Strategy 1: oEmbed (Spotify) — public, no auth, returns track name ──
+    if platform == "spotify":
+        try:
+            req = urllib.request.Request(
+                "https://open.spotify.com/oembed?url=" + urllib.parse.quote(url, safe=":/?=&"),
+                headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read(50_000).decode("utf-8", errors="ignore"))
+            title = (data.get("title") or "").strip()
+            # oEmbed only gives title, fall through to embed page for artist
+            artist = ""
+            try:
+                emb_url = data.get("iframe_url") or (
+                    "https://open.spotify.com/embed/track/" + url.rstrip("/").split("/")[-1].split("?")[0]
+                )
+                req2 = urllib.request.Request(emb_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req2, timeout=15) as resp2:
+                    page = resp2.read(200_000).decode("utf-8", errors="ignore")
+                m = re.search(r'"artists":\s*\[\s*\{\s*"name"\s*:\s*"([^"]+)"', page)
+                if m:
+                    artist = m.group(1).strip()
+                if not title:
+                    m2 = re.search(r'"name"\s*:\s*"([^"]+)"', page)
+                    if m2:
+                        title = m2.group(1).strip()
+            except Exception as e:  # noqa: BLE001
+                log.debug(f"[music] Spotify embed parse: {e}")
+            if artist and title:
+                return f"{artist} - {title}"
+            if title:
+                return title
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"[music] Spotify oEmbed failed: {e}")
+
+    # ── Strategy 2: OpenGraph meta tags from main URL (Deezer / Apple / Tidal) ──
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read(300_000).decode("utf-8", errors="ignore")
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"[music] DRM metadata fetch failed ({platform}): {e}")
+        return None
+
+    def _meta(prop: str) -> str:
+        # Match both orderings: property=...content=...  AND  content=...property=...
+        m = re.search(
+            rf'<meta[^>]+(?:property|name)=["\']{re.escape(prop)}["\'][^>]+content=["\']([^"\']+)["\']',
+            html, re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        m = re.search(
+            rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']{re.escape(prop)}["\']',
+            html, re.IGNORECASE,
+        )
+        return m.group(1).strip() if m else ""
+
+    og_title = _meta("og:title")
+    og_desc = _meta("og:description")
+    music_musician = _meta("music:musician") or _meta("music:musician_description")
+
+    # `music:musician` is often a URL on Deezer — discard it in that case
+    if music_musician and re.match(r"^https?://", music_musician):
+        music_musician = ""
+
+    title = og_title
+    artist = music_musician
+
+    # Try to extract artist from og:description when not available directly
+    if not artist and og_desc:
+        # Spotify: "Listen to TITLE on Spotify. ARTIST · Song · YEAR"
+        m = re.search(r"on (?:Spotify|Deezer|Apple Music|Tidal)\.\s*([^·•]+?)(?:\s*[·•]|$)",
+                      og_desc, re.IGNORECASE)
+        if m:
+            artist = m.group(1).strip()
+        else:
+            # Deezer / generic: "Listen to TITLE by ARTIST on Deezer"
+            m = re.search(r"\bby\s+(.+?)(?:\s+on\s+|\s+from\s+|$)", og_desc, re.IGNORECASE)
+            if m:
+                artist = m.group(1).strip()
+            else:
+                # Dot/bullet/dash separated lists:
+                #   "Song · ARTIST · YEAR"  (Apple Music)
+                #   "ARTIST - song - YEAR" (Deezer)
+                generic = re.compile(
+                    r"^(?:song|album|track|playlist|ep|single|"
+                    r"spotify|deezer|apple\s*music|tidal|"
+                    r"listen\s*to|year)$",
+                    re.IGNORECASE,
+                )
+                year_rx = re.compile(r"^\d{4}$")
+                # Split on bullets OR space-dash-space (but not unicode dashes inside names)
+                parts = [p.strip() for p in re.split(r"\s*[·•]\s*|\s+-\s+", og_desc) if p.strip()]
+                parts = [p for p in parts if not generic.match(p) and not year_rx.match(p)]
+                if parts:
+                    artist = parts[0]
+
+    artist = (artist or "").strip().strip("-—–·")
+    title = (title or "").strip().strip("-—–·")
+    # Strip trailing platform suffix sometimes present in titles
+    title = re.sub(r"\s*[-–|]\s*(Spotify|Deezer|Apple Music|Tidal)\s*$", "", title, flags=re.I)
+
+    if artist and title:
+        return f"{artist} - {title}"
+    if title:
+        return title
+    return None
 
 
 def _sc_search_sync(query: str) -> list[dict]:
@@ -811,11 +1020,14 @@ def _sc_search_sync(query: str) -> list[dict]:
     return results
 
 
-def _sc_download_sync(url: str, tmpdir: str) -> dict | None:
-    """Download a SoundCloud track into tmpdir. Blocking — run in a thread.
+def _music_download_sync(target: str, tmpdir: str, is_search: bool = False) -> dict | None:
+    """Download audio from any platform supported by yt-dlp.
 
-    Prefers progressive MP3; converts to MP3 192k when ffmpeg is available.
-    Returns dict with filepath/title/uploader/duration/thumb, or None.
+    `target` can be:
+      • a direct URL (SoundCloud / YouTube / Bandcamp / Mixcloud / ...)
+      • a `ytsearch1:` query string (used as fallback for DRM platforms)
+
+    Always returns mp3 when ffmpeg is available, otherwise the best progressive audio.
     """
     have_ffmpeg = shutil.which("ffmpeg") is not None
     opts = {
@@ -825,6 +1037,9 @@ def _sc_download_sync(url: str, tmpdir: str) -> dict | None:
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
+        "default_search": "ytsearch1",
+        # Cap downloads at a sane size to protect Telegram upload limits & disk
+        "max_filesize": 100 * 1024 * 1024,  # 100MB
     }
     if have_ffmpeg:
         opts["postprocessors"] = [{
@@ -833,13 +1048,12 @@ def _sc_download_sync(url: str, tmpdir: str) -> dict | None:
             "preferredquality": "192",
         }]
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+        info = ydl.extract_info(target, download=True)
     if info and "entries" in info:
         entries = [e for e in info["entries"] if e]
         info = entries[0] if entries else None
     if not info:
         return None
-    # Locate the downloaded audio file
     audio_exts = {".mp3", ".m4a", ".opus", ".ogg", ".aac", ".wav", ".flac"}
     filepath = None
     for name in os.listdir(tmpdir):
@@ -848,10 +1062,10 @@ def _sc_download_sync(url: str, tmpdir: str) -> dict | None:
             break
     if not filepath:
         return None
-    # Fetch cover art for the Telegram audio thumbnail
+    # Cover art for Telegram audio thumbnail
     thumb_path = None
     thumb_url = info.get("thumbnail") or ""
-    if thumb_url.split("?")[0].lower().endswith((".jpg", ".jpeg", ".png")):
+    if thumb_url.split("?")[0].lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
         try:
             thumb_path = os.path.join(tmpdir, "cover.jpg")
             urllib.request.urlretrieve(thumb_url, thumb_path)
@@ -860,45 +1074,97 @@ def _sc_download_sync(url: str, tmpdir: str) -> dict | None:
     return {
         "filepath": filepath,
         "title": info.get("title") or "Unknown",
-        "uploader": info.get("uploader") or "",
+        "uploader": info.get("uploader") or info.get("channel") or info.get("artist") or "",
         "duration": int(info.get("duration") or 0),
         "thumb": thumb_path,
+        "source_url": info.get("webpage_url") or "",
     }
 
 
-async def _sc_download_and_send(event, url: str) -> None:
-    """Download a SoundCloud track and send it as audio in the current chat."""
-    msg = await event.edit(t("sc_downloading"))
-    tmpdir = tempfile.mkdtemp(prefix="bidar_sc_")
+async def _music_download_and_send(event, url: str, platform: str, is_drm: bool, *, reply_to_msg_id=None) -> bool:
+    """Download a track from any platform and send it as audio.
+
+    For DRM platforms (Spotify/Deezer/Apple Music/Tidal), extracts metadata then
+    searches YouTube via `ytsearch1:` as a fallback.
+
+    Returns True on success.
+    `reply_to_msg_id` overrides the default reply target (used by auto-detect handler).
+    """
+    label = _PLATFORM_LABEL.get(platform, platform.capitalize())
+    # For outgoing command flow we edit; for incoming auto-detect we reply with status
+    is_owned = bool(getattr(event, "out", False))
+    status_msg = None
     try:
-        info = await asyncio.to_thread(_sc_download_sync, url, tmpdir)
-        if not info:
-            await msg.edit(t("sc_failed", e="no audio file"))
-            return
-        await msg.edit(t("sc_uploading", title=info["title"][:80]))
-        attrs = [DocumentAttributeAudio(
-            duration=info["duration"],
-            title=info["title"][:60],
-            performer=(info["uploader"] or "SoundCloud")[:60],
-        )]
-        await client.send_file(
-            event.chat_id,
-            info["filepath"],
-            caption=t("sc_caption", title=info["title"][:200], artist=info["uploader"] or "—"),
-            attributes=attrs,
-            thumb=info["thumb"],
-            reply_to=event.reply_to_msg_id,
-        )
-        await msg.delete()
-        log.info(f"[.sc] sent: {info['title']}")
-    except Exception as e:  # noqa: BLE001
-        log.error(f"[.sc] download/send failed: {e}")
+        if is_owned:
+            status_msg = await event.edit(t("music_downloading", platform=label))
+        else:
+            status_msg = await event.reply(t("music_downloading", platform=label))
+
+        target = url
+        # DRM: extract metadata first, then search YouTube
+        if is_drm:
+            try:
+                await status_msg.edit(t("music_resolving", platform=label))
+            except Exception:  # noqa: BLE001
+                pass
+            query = await asyncio.to_thread(_fetch_drm_metadata, url, platform)
+            if not query:
+                # Last-ditch fallback: use the URL itself as query string
+                query = url
+            log.info(f"[music] DRM {platform} → ytsearch1: {query}")
+            target = f"ytsearch1:{query}"
+
+        tmpdir = tempfile.mkdtemp(prefix="bidar_music_")
         try:
-            await msg.edit(t("sc_failed", e=str(e)[:200]))
-        except Exception:  # noqa: BLE001
-            pass
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
+            info = await asyncio.to_thread(_music_download_sync, target, tmpdir, is_drm)
+            if not info:
+                await status_msg.edit(t("music_failed", platform=label, e="no audio file"))
+                return False
+            try:
+                await status_msg.edit(t("music_uploading", title=info["title"][:80]))
+            except Exception:  # noqa: BLE001
+                pass
+            attrs = [DocumentAttributeAudio(
+                duration=info["duration"],
+                title=info["title"][:60],
+                performer=(info["uploader"] or label)[:60],
+            )]
+            send_reply_to = reply_to_msg_id if reply_to_msg_id is not None else getattr(event, "reply_to_msg_id", None)
+            if send_reply_to is None and not is_owned:
+                # Auto-detect path: reply to the incoming message
+                send_reply_to = event.message.id
+            await client.send_file(
+                event.chat_id,
+                info["filepath"],
+                caption=t("music_caption",
+                          title=info["title"][:200],
+                          artist=info["uploader"] or "—",
+                          platform=label),
+                attributes=attrs,
+                thumb=info["thumb"],
+                reply_to=send_reply_to,
+            )
+            try:
+                await status_msg.delete()
+            except Exception:  # noqa: BLE001
+                pass
+            log.info(f"[music] sent ({platform}): {info['title']}")
+            return True
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[music] download/send failed ({platform}): {e}")
+        if status_msg is not None:
+            try:
+                await status_msg.edit(t("music_failed", platform=label, e=str(e)[:200]))
+            except Exception:  # noqa: BLE001
+                pass
+        return False
+
+
+# Backwards-compatible alias: existing call sites still use _sc_download_and_send
+async def _sc_download_and_send(event, url: str) -> None:
+    await _music_download_and_send(event, url, "soundcloud", False)
 
 
 # ────────── Search Helpers ──────────
@@ -1297,7 +1563,7 @@ async def cmd_aigroups(event):
     )
     config["ai_groups_enabled"] = new
     save_config()
-    await event.edit(t("aigroups_set", state=_state_label(new)))
+    await event.edit(t("aigroups_set", state=_state_label(new), p=CMD_PREFIX))
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}personality(?:\s+([\s\S]+))?$"))
@@ -1690,11 +1956,15 @@ async def cmd_searchall(event):
     await _do_search_and_send(event, query, only_restricted=True)
 
 
-# ═════════ SoundCloud Music Download ═════════
+# ═════════ Universal Music Downloader (any platform) ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}sc(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_soundcloud(event):
-    """Download music from SoundCloud: by link, by search query, or by picking a result number."""
+    """Universal music downloader.
+    - `.sc <link>` — any supported platform (SoundCloud, YouTube, Spotify, Deezer, Apple Music, Tidal, Bandcamp, …)
+    - `.sc <query>` — search SoundCloud (top 5)
+    - `.sc <1-5>` — pick from last search results
+    """
     arg = event.pattern_match.group(1)
     if not arg or not arg.strip():
         await event.edit(t("sc_usage", p=CMD_PREFIX))
@@ -1715,22 +1985,23 @@ async def cmd_soundcloud(event):
         if not (1 <= idx <= len(results)):
             await event.edit(t("sc_invalid_pick", n=len(results)))
             return
-        await _sc_download_and_send(event, results[idx - 1]["url"])
+        await _music_download_and_send(event, results[idx - 1]["url"], "soundcloud", False)
         return
 
-    # Case 2: direct SoundCloud link
-    m = _SC_URL_RE.search(arg)
-    if m:
-        await _sc_download_and_send(event, m.group(0))
+    # Case 2: any supported music platform URL
+    detected = _detect_music_url(arg)
+    if detected:
+        platform, url, is_drm = detected
+        await _music_download_and_send(event, url, platform, is_drm)
         return
 
-    # Case 3: search by song name → show top 5 results
+    # Case 3: search by song name → show top 5 SoundCloud results
     msg = await event.edit(t("sc_searching", q=arg[:100]))
     try:
         results = await asyncio.to_thread(_sc_search_sync, arg)
     except Exception as e:  # noqa: BLE001
         log.error(f"[.sc] search failed: {e}")
-        await msg.edit(t("sc_failed", e=str(e)[:200]))
+        await msg.edit(t("music_failed", platform="SoundCloud", e=str(e)[:200]))
         return
     if not results:
         await msg.edit(t("sc_no_results", q=arg[:100]))
@@ -1744,6 +2015,116 @@ async def cmd_soundcloud(event):
     await msg.edit(t("sc_results", q=arg[:100], list="\n".join(lines), p=CMD_PREFIX))
 
 
+# ═════════ Music auto-detect toggle ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}music(?:\s+(on|off|روشن|خاموش))?$"))
+@owner_only
+async def cmd_music(event):
+    arg = event.pattern_match.group(1)
+    new = _parse_on_off(
+        None if arg is None else ("on" if arg in {"on", "روشن"} else "off"),
+        config.get("music_enabled", True),
+    )
+    config["music_enabled"] = new
+    save_config()
+    await event.edit(t("music_set", state=_state_label(new), p=CMD_PREFIX))
+
+
+# ═════════ Allowed groups whitelist (unified for AI + Music) ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}allow(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_allow(event):
+    """Manage the unified whitelist of allowed groups for AI replies and music auto-detect."""
+    arg = (event.pattern_match.group(1) or "").strip()
+    parts = arg.split(maxsplit=1) if arg else []
+    sub = (parts[0].lower() if parts else "")
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    allowed = list(config.get("allowed_groups", []) or [])
+
+    def _save_and_set(new_list):
+        config["allowed_groups"] = new_list
+        save_config()
+
+    # No arg or "help"
+    if not sub or sub == "help":
+        await event.edit(t("allow_help", p=CMD_PREFIX))
+        return
+
+    # `.allow list`
+    if sub in {"list", "ls", "show"}:
+        if not allowed:
+            await event.edit(t("allow_list_empty", p=CMD_PREFIX))
+            return
+        body = "\n".join(f"  • `{cid}`" for cid in allowed)
+        await event.edit(t("allow_list_title", n=len(allowed), list=body, p=CMD_PREFIX))
+        return
+
+    # `.allow clear`
+    if sub in {"clear", "reset"}:
+        n = len(allowed)
+        _save_and_set([])
+        await event.edit(t("allow_cleared", n=n))
+        return
+
+    # `.allow here` — add current chat
+    if sub == "here":
+        if event.is_private:
+            await event.edit(t("allow_here_pv"))
+            return
+        cid = int(event.chat_id)
+        if cid in allowed:
+            await event.edit(t("allow_exists", cid=cid))
+            return
+        allowed.append(cid)
+        _save_and_set(allowed)
+        await event.edit(t("allow_added", cid=cid, n=len(allowed)))
+        return
+
+    # `.allow rmhere` — remove current chat
+    if sub == "rmhere":
+        cid = int(event.chat_id)
+        if cid not in allowed:
+            await event.edit(t("allow_notfound", cid=cid))
+            return
+        allowed.remove(cid)
+        _save_and_set(allowed)
+        await event.edit(t("allow_removed", cid=cid, n=len(allowed)))
+        return
+
+    # `.allow add <id>`
+    if sub in {"add", "+"}:
+        try:
+            cid = int(rest)
+        except (TypeError, ValueError):
+            await event.edit(t("allow_invalid"))
+            return
+        if cid in allowed:
+            await event.edit(t("allow_exists", cid=cid))
+            return
+        allowed.append(cid)
+        _save_and_set(allowed)
+        await event.edit(t("allow_added", cid=cid, n=len(allowed)))
+        return
+
+    # `.allow remove <id>` / `.allow del <id>` / `.allow -`
+    if sub in {"remove", "rm", "del", "delete", "-"}:
+        try:
+            cid = int(rest)
+        except (TypeError, ValueError):
+            await event.edit(t("allow_invalid"))
+            return
+        if cid not in allowed:
+            await event.edit(t("allow_notfound", cid=cid))
+            return
+        allowed.remove(cid)
+        _save_and_set(allowed)
+        await event.edit(t("allow_removed", cid=cid, n=len(allowed)))
+        return
+
+    # Unknown subcommand → show help
+    await event.edit(t("allow_help", p=CMD_PREFIX))
+
+
 # ═════════ Info commands ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}stats$"))
 @owner_only
@@ -1752,6 +2133,8 @@ async def cmd_stats(event):
     interval = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
     ready, ai_err = _ai_ready()
     ai_state = t("on") if (config.get("ai_enabled") and ready) else t("off")
+    music_state = t("on") if config.get("music_enabled", True) else t("off")
+    allowed = config.get("allowed_groups", []) or []
     text = (
         f"{t('stats_title')}\n\n"
         f"{t('stats_uptime')}: `{_fmt_uptime(uptime)}`\n"
@@ -1764,6 +2147,8 @@ async def cmd_stats(event):
         f"  {t('stats_ai_groupcd')}: `{config.get('group_cooldown', 0)}s`"
         f"{(' ' + t('no_limit')) if config.get('group_cooldown', 0) == 0 else ''}\n"
         f"  {t('stats_ai_sessions')}: `{len(_chat_sessions)}`\n\n"
+        f"🎵 Music auto-detect: `{music_state}`\n"
+        f"📋 Allowed groups: `{len(allowed)}`\n\n"
         f"{t('stats_received')}: `{stats['messages_received']}`\n"
         f"{t('stats_sent')}: `{stats['replies_sent']}`\n"
         f"{t('stats_ai_replies')}: `{stats['ai_replies']}`\n"
@@ -1824,10 +2209,61 @@ async def handle_incoming(event):
         return
     if OWNER_ID is not None and sender.id == OWNER_ID:
         return
+    # Music auto-detect (private chats always + whitelisted groups). Runs in
+    # the background so it never blocks the AI/auto-reply flow.
+    asyncio.create_task(_maybe_handle_music_link(event, sender))
     if event.is_private:
         await _handle_private(event, sender)
     else:
         await _handle_group_or_channel(event, sender)
+
+
+async def _maybe_handle_music_link(event, sender) -> None:
+    """Auto-detect music links in messages and reply with the downloaded audio."""
+    if not config.get("music_enabled", True):
+        return
+    if not YTDLP_OK:
+        return
+    text = event.raw_text or ""
+    if not text:
+        return
+    detected = _detect_music_url(text)
+    if not detected:
+        return
+    platform, url, is_drm = detected
+
+    # Authorization scope:
+    #   - private chats: always allowed
+    #   - groups/channels: only if chat_id is in allowed_groups whitelist
+    if not event.is_private:
+        allowed = config.get("allowed_groups", []) or []
+        if int(event.chat_id) not in allowed:
+            log.debug(f"[music-auto] skip — chat {event.chat_id} not in whitelist")
+            return
+
+    # Per-chat dedup: ignore the same URL within 5 minutes
+    dedup_key = f"{event.chat_id}|{url}"
+    now = time.time()
+    last = _music_recent.get(dedup_key, 0)
+    if now - last < 300:
+        return
+    _music_recent[dedup_key] = now
+    # GC old entries
+    if len(_music_recent) > 200:
+        cutoff = now - 1800
+        for k in list(_music_recent.keys()):
+            if _music_recent[k] < cutoff:
+                _music_recent.pop(k, None)
+
+    log.info(
+        f"[music-auto] {platform} link in chat={event.chat_id} from={getattr(sender,'id','?')} "
+        f"drm={is_drm} url={url}"
+    )
+    try:
+        await _music_download_and_send(event, url, platform, is_drm,
+                                       reply_to_msg_id=event.message.id)
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[music-auto] handler failed: {e}")
 
 
 async def _handle_private(event, sender) -> None:
@@ -1860,6 +2296,12 @@ async def _handle_private(event, sender) -> None:
 
 async def _handle_group_or_channel(event, sender) -> None:
     if not (config.get("ai_enabled") and config.get("ai_groups_enabled")):
+        return
+    # Whitelist: AI in groups only responds in chats present in `allowed_groups`.
+    # If the list is empty, AI in groups is effectively disabled.
+    allowed = config.get("allowed_groups", []) or []
+    if int(event.chat_id) not in allowed:
+        log.debug(f"[group-ai] skip — chat {event.chat_id} not in whitelist")
         return
     ready, _ = _ai_ready()
     if not ready:

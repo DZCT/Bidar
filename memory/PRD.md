@@ -1,4 +1,4 @@
-# PRD — Bidar v1.8.0 (Always Online Telegram Userbot + AI Assistant)
+# PRD — Bidar v1.9.0 (Always Online Telegram Userbot + AI Assistant)
 
 ## Problem Statement
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
@@ -73,8 +73,25 @@
 - ✅ Bilingual UI keys (11 keys) + help menu entries
 - ✅ Unit test: `tests/test_soundcloud.py` — 48 checks, all passing + real E2E download verified
 
-## Commands Summary (v1.8.0)
-**Total: 30+ commands**, all `@owner_only`
+### v1.9.0 — Universal Music Downloader + Auto-Detect + Whitelist (Completed Feb 2026)
+- ✅ **`.sc <link>` accepts any music platform**: SoundCloud, YouTube, YouTube Music, Bandcamp, Mixcloud, Yandex (direct via yt-dlp) + Spotify, Deezer, Apple Music, Tidal (DRM fallback via metadata → YouTube)
+- ✅ Spotify metadata extraction via official **oEmbed** + embed page JSON (bypasses Spotify bot detection)
+- ✅ Deezer/Apple/Tidal extraction via OpenGraph meta tags with smart parsing (handles `Song · Artist · Year`, `Artist - song - year`, `Listen to X by Y`)
+- ✅ **Auto-detect**: incoming music links in PV (always) and whitelisted groups → auto-downloaded and replied as audio
+- ✅ `.music on|off` — global toggle for auto-detect feature
+- ✅ Per-chat URL dedup (5min cooldown for same link)
+- ✅ **`.allow` whitelist command** (unified for AI + Music in groups):
+  - `.allow here` / `.allow rmhere` — add/remove current chat
+  - `.allow add/remove <chat_id>` — by numeric ID
+  - `.allow list` / `.allow clear`
+- ✅ Group AI replies now require chat_id in `allowed_groups` list (in addition to mention/reply trigger)
+- ✅ Bilingual UI keys (15+ new keys: music_*, allow_*) + updated help menu
+- ✅ Fixed shallow-copy bug in config init (deepcopy of _DEFAULT_CONFIG)
+- ✅ Unit tests: `tests/test_music_universal.py` — 25 tests covering URL detection (10 platforms), DRM metadata mocks, allow-list persistence, auto-detect flow, dedup, i18n keys
+- ✅ Real E2E verified: Spotify "Blinding Lights" → resolved to "The Weeknd - Blinding Lights" → yt-dlp found on YouTube
+
+## Commands Summary (v1.9.0)
+**Total: 33+ commands**, all `@owner_only`
 
 | Category | Commands |
 |---|---|
@@ -84,7 +101,8 @@
 | Translation | `.lang`, `.tl`, `.to` |
 | Image | `.img`, `.imgedit`, `.imgmodel`, `.ocr` |
 | Search | `.search`, `.searchall` |
-| Music | `.sc` (link / search / pick) |
+| Music | `.sc` (universal — link/search/pick), `.music` (auto-detect toggle) |
+| Whitelist | `.allow` (add/remove/here/rmhere/list/clear) |
 | Admin | `.botlang`, `.restart` |
 | Info | `.ping`, `.stats`, `.alive`, `.id`, `.help` |
 
@@ -117,16 +135,18 @@ bash <(curl -fsSL -H "Authorization: token $GH_TOKEN" \
   https://raw.githubusercontent.com/DZCT/Bidar/main/bidar/install.sh)
 ```
 
-## Test Results (Jun 2026 — v1.8.0)
-✅ Syntax check passes
-✅ `tests/test_search.py` — all passing (regression OK; note: tests now use API_ID=12345, Telethon rejects 0)
-✅ `tests/test_soundcloud.py` — 48 checks passing (URL regex, routing, search/download sync mocked, i18n keys)
-✅ Real E2E: live SoundCloud search (5 results, Persian query) + real MP3 download (4MB, cover art) via bidar functions
+## Test Results (Feb 2026 — v1.9.0)
+✅ Syntax check passes (py_compile + lint clean)
+✅ `tests/test_search.py` — all passing
+✅ `tests/test_soundcloud.py` — 48 checks passing (legacy + new universal helpers)
+✅ `tests/test_music_universal.py` — 25 tests passing (URL detection, DRM metadata, allow-list, auto-detect flow, dedup, i18n)
+✅ Real E2E: Spotify oEmbed/embed parser → "The Weeknd - Blinding Lights" / "Ed Sheeran - Shape of You"; Deezer OG parser → "Eminem - Drips"
+✅ yt-dlp ytsearch1 fallback verified end-to-end on YouTube
 
 ## Next Action Items
-- کاربر "Save to GitHub" بزنه تا v1.8.0 روی ریپو push بشه
-- روی VPS با `bash update.sh` آپدیت کنه (ffmpeg خودکار نصب میشه)
-- توی تلگرام `.sc <اسم آهنگ>` و `.sc <لینک>` رو تست کنه
+- User to run `bash update.sh` on VPS to deploy v1.9.0
+- Test in Telegram: `.sc <spotify-link>`, `.sc <apple-music-link>`, then send a link in PV to verify auto-detect, then `.allow here` in a group + send link to verify whitelist
+- "Save to GitHub" to push v1.9.0 to `DZCT/Bidar`
 
 ## Backlog (Prioritized)
 ### P1
