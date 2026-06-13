@@ -1,4 +1,4 @@
-# PRD — Bidar v1.9.0 (Always Online Telegram Userbot + AI Assistant)
+# PRD — Bidar v1.9.1 (Always Online Telegram Userbot + AI Assistant)
 
 ## Problem Statement
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
@@ -90,7 +90,22 @@
 - ✅ Unit tests: `tests/test_music_universal.py` — 25 tests covering URL detection (10 platforms), DRM metadata mocks, allow-list persistence, auto-detect flow, dedup, i18n keys
 - ✅ Real E2E verified: Spotify "Blinding Lights" → resolved to "The Weeknd - Blinding Lights" → yt-dlp found on YouTube
 
-## Commands Summary (v1.9.0)
+### v1.9.1 — Music Bug-Fix Release (Completed Jun 2026)
+User-reported bugs (with screenshots) — all fixed & E2E verified:
+- ✅ **`on.soundcloud.com` short share-links** now detected (regex allowed only www/m subdomains → links fell into search mode → "No results found"). Also added `spotify.link` & `deezer.page.link` shorteners (resolved via `_resolve_redirect`).
+- ✅ **Spotify "no audio file"** fixed — three-layer fix:
+  - yt-dlp format pref now `bestaudio[ext=m4a]/bestaudio[ext=mp3]/...` (proper audio file even without ffmpeg; old code could end up with `.webm` not in audio_exts)
+  - broader audio_exts (incl. `.webm`, `.oga`, `.mka`) + largest-file pick, skip `.part`/`.ytdl`
+  - **DRM fallback chain**: `ytsearch1:` → top-3 SoundCloud results (YouTube returns HTTP 403 on most datacenter IPs; first SC result may be DRM Go+ — loop skips to next). Verified live: Spotify→ Joost "Europapa" delivered via SC result #2.
+- ✅ **Whitelisted groups never matched** — root cause: `.id` showed the raw positive entity ID (e.g. `2453861964`) while whitelist check compared against marked `-100…` form. Added `_chat_id_variants()` normalization — any ID form now matches (`_is_chat_allowed`). `.id` now shows the marked `event.chat_id`. `.allow add/remove/here/rmhere` are variant-aware.
+- ✅ **Owner's own links now auto-detected** — new `outgoing=True` handler (PV + whitelisted groups); replies instead of editing (never destroys the original message). Bot's own status messages excluded via emoji-prefix guard.
+- ✅ Music auto-detect now also covers links posted by **bots/channels** in whitelisted groups.
+- ✅ Failed downloads **clear the dedup entry** → immediate retry possible (before: 5-min silent window after failure).
+- ✅ DRM metadata failure now shows a clear bilingual error (`music_meta_failed`) instead of garbage-searching the URL on YouTube.
+- ✅ Removed dead `_SC_URL_RE`; tests migrated to `_detect_music_url`.
+- ✅ Tests: 47 passing (22 new in `test_music_universal.py` for shortlinks, chat-ID variants, outgoing flow, dedup-retry).
+
+## Commands Summary (v1.9.1)
 **Total: 33+ commands**, all `@owner_only`
 
 | Category | Commands |

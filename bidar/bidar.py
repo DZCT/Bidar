@@ -65,7 +65,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -457,6 +457,10 @@ I18N = {
                           "fa": "🔎 شناسایی آهنگ از {platform} (به دلیل DRM، از یوتیوب می‌گیرم)..."},
     "music_uploading":   {"en": "📤 Uploading: _{title}_ ...", "fa": "📤 در حال آپلود: _{title}_ ..."},
     "music_failed":      {"en": "❌ {platform} download failed: `{e}`", "fa": "❌ دانلود از {platform} ناموفق بود: `{e}`"},
+    "music_meta_failed": {
+        "en": "❌ Couldn't read track info from {platform}. Try `{p}sc <song name>` instead.",
+        "fa": "❌ اطلاعات آهنگ از {platform} خونده نشد. به‌جاش `{p}sc <اسم آهنگ>` رو امتحان کن.",
+    },
     "music_caption":     {"en": "🎵 **{title}**\n👤 {artist}\n☁️ {platform}",
                           "fa": "🎵 **{title}**\n👤 {artist}\n☁️ {platform}"},
 
@@ -810,13 +814,12 @@ async def _ocr_image(image_bytes: bytes) -> str | None:
 
 
 # ────────── Music Helpers (Universal Downloader) ──────────
-_SC_URL_RE = re.compile(r"https?://(?:[\w.-]+\.)?(?:soundcloud\.com|snd\.sc)/\S+", re.IGNORECASE)
-
 # Platform detection patterns. Order matters — first match wins.
 _MUSIC_PLATFORMS: list[tuple[str, re.Pattern, bool]] = [
     # (name, regex, is_drm_protected)
     ("youtube",   re.compile(r"https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?[^\s]*v=|shorts/|playlist\?list=)|youtu\.be/)[\w\-]+(?:[?&][^\s]*)?", re.I), False),
-    ("soundcloud",re.compile(r"https?://(?:(?:www|m)\.)?(?:soundcloud\.com|snd\.sc)/[\w\-/?=&%.#]+", re.I), False),
+    # Any subdomain (www / m / on.soundcloud.com mobile share-links) is valid
+    ("soundcloud",re.compile(r"https?://(?:[\w-]+\.)?(?:soundcloud\.com|snd\.sc)/[\w\-/?=&%.#]+", re.I), False),
     ("bandcamp",  re.compile(r"https?://[\w\-]+\.bandcamp\.com/(?:track|album)/[\w\-]+", re.I), False),
     ("mixcloud",  re.compile(r"https?://(?:www\.)?mixcloud\.com/[\w\-]+/[\w\-]+/?", re.I), False),
     ("vimeo",     re.compile(r"https?://(?:www\.)?vimeo\.com/\d+", re.I), False),
@@ -826,6 +829,9 @@ _MUSIC_PLATFORMS: list[tuple[str, re.Pattern, bool]] = [
     ("deezer",    re.compile(r"https?://(?:www\.)?deezer\.com/(?:\w+/)?track/\d+", re.I), True),
     ("apple",     re.compile(r"https?://music\.apple\.com/[\w\-/]+/(?:song|album)/[^\s?]+(?:\?i=\d+)?", re.I), True),
     ("tidal",     re.compile(r"https?://(?:(?:listen|www)\.)?tidal\.com/(?:browse/)?track/\d+", re.I), True),
+    # Short share-links (resolved to canonical URLs before download)
+    ("spotify",   re.compile(r"https?://spotify\.link/[\w]+", re.I), True),
+    ("deezer",    re.compile(r"https?://(?:deezer\.page\.link|link\.deezer\.com)/[\w]+", re.I), True),
 ]
 
 _PLATFORM_LABEL = {
@@ -853,6 +859,70 @@ def _detect_music_url(text: str) -> tuple[str, str, bool] | None:
         if m:
             return name, m.group(0), is_drm
     return None
+
+
+# Short share-links that must be resolved to a canonical URL before metadata
+# extraction (DRM platforms). SoundCloud's on.soundcloud.com links are handled
+# natively by yt-dlp and need no resolution.
+_SHORTLINK_RE = re.compile(
+    r"https?://(?:spotify\.link|deezer\.page\.link|link\.deezer\.com)/", re.I)
+
+
+def _resolve_redirect(url: str) -> str:
+    """Follow HTTP redirects and return the final URL. Blocking — run in a thread."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(url, headers=headers, method=method)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                if method == "GET":
+                    resp.read(1024)
+                return resp.url or url
+        except Exception as e:  # noqa: BLE001
+            log.debug(f"[music] redirect resolve ({method}) failed: {e}")
+    return url
+
+
+# ────────── Whitelist helpers (unified for AI + Music) ──────────
+def _chat_id_variants(cid) -> set[int]:
+    """All equivalent representations of a Telegram chat ID.
+
+    `.id`-style raw positive IDs (`2453861964`), marked supergroup IDs
+    (`-1002453861964`) and legacy negative group IDs (`-456789`) all map to
+    the same set, so whitelist checks match regardless of the stored form.
+    """
+    try:
+        cid = int(cid)
+    except (TypeError, ValueError):
+        return set()
+    raw = abs(cid)
+    variants = {cid, raw, -raw}
+    s = str(raw)
+    if s.startswith("100") and len(s) > 6:
+        bare = int(s[3:])
+        variants |= {bare, -bare}
+    else:
+        variants.add(int("-100" + s))
+    return variants
+
+
+def _is_chat_allowed(chat_id) -> bool:
+    """True if `chat_id` (in any representation) is in the allowed_groups whitelist."""
+    allowed = config.get("allowed_groups", []) or []
+    if not allowed:
+        return False
+    variants = _chat_id_variants(chat_id)
+    return any(int(a) in variants for a in allowed)
+
+
+def _whitelist_contains(cid, lst) -> bool:
+    variants = _chat_id_variants(cid)
+    return any(int(x) in variants for x in lst)
+
+
+def _whitelist_without(cid, lst) -> list:
+    variants = _chat_id_variants(cid)
+    return [x for x in lst if int(x) not in variants]
 
 
 def _fmt_duration(seconds) -> str:
@@ -1081,27 +1151,42 @@ def _music_download_sync(target: str, tmpdir: str, is_search: bool = False) -> d
     }
 
 
-async def _music_download_and_send(event, url: str, platform: str, is_drm: bool, *, reply_to_msg_id=None) -> bool:
+async def _music_download_and_send(event, url: str, platform: str, is_drm: bool, *,
+                                   reply_to_msg_id=None, force_reply: bool = False) -> bool:
     """Download a track from any platform and send it as audio.
 
     For DRM platforms (Spotify/Deezer/Apple Music/Tidal), extracts metadata then
-    searches YouTube via `ytsearch1:` as a fallback.
+    searches YouTube → SoundCloud for the actual audio.
 
     Returns True on success.
     `reply_to_msg_id` overrides the default reply target (used by auto-detect handler).
+    `force_reply=True` makes the status message a reply even for the owner's own
+    messages (auto-detect on outgoing links must never edit the original message).
     """
     label = _PLATFORM_LABEL.get(platform, platform.capitalize())
-    # For outgoing command flow we edit; for incoming auto-detect we reply with status
-    is_owned = bool(getattr(event, "out", False))
+    # `.sc` command flow edits the command message; auto-detect always replies.
+    is_owned = bool(getattr(event, "out", False)) and not force_reply
     status_msg = None
+    tmpdir = None
     try:
         if is_owned:
             status_msg = await event.edit(t("music_downloading", platform=label))
         else:
             status_msg = await event.reply(t("music_downloading", platform=label))
 
-        target = url
-        # DRM: extract metadata first, then search YouTube
+        # Short share-links (spotify.link, deezer.page.link, …) → resolve to the
+        # canonical URL first so platform detection & metadata extraction work.
+        if _SHORTLINK_RE.match(url):
+            final = await asyncio.to_thread(_resolve_redirect, url)
+            if final and final != url:
+                redetected = _detect_music_url(final)
+                if redetected:
+                    platform, url, is_drm = redetected
+                    label = _PLATFORM_LABEL.get(platform, platform.capitalize())
+                else:
+                    url = final
+
+        # DRM: extract metadata first, then search YouTube → SoundCloud fallback
         if is_drm:
             try:
                 await status_msg.edit(t("music_resolving", platform=label))
@@ -1109,49 +1194,73 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
                 pass
             query = await asyncio.to_thread(_fetch_drm_metadata, url, platform)
             if not query:
-                # Last-ditch fallback: use the URL itself as query string
-                query = url
-            log.info(f"[music] DRM {platform} → ytsearch1: {query}")
-            target = f"ytsearch1:{query}"
-
-        tmpdir = tempfile.mkdtemp(prefix="bidar_music_")
-        try:
-            info = await asyncio.to_thread(_music_download_sync, target, tmpdir, is_drm)
-            if not info:
-                await status_msg.edit(t("music_failed", platform=label, e="no audio file"))
+                await status_msg.edit(t("music_meta_failed", platform=label, p=CMD_PREFIX))
                 return False
+            log.info(f"[music] DRM {platform} → search query: {query}")
+            # YouTube first (most accurate match). Server/datacenter IPs are
+            # often blocked by YouTube (HTTP 403), so also queue the top
+            # SoundCloud results — DRM-protected (Go+ preview) entries raise
+            # and the loop simply moves on to the next candidate.
+            targets = [f"ytsearch1:{query}"]
             try:
-                await status_msg.edit(t("music_uploading", title=info["title"][:80]))
-            except Exception:  # noqa: BLE001
-                pass
-            attrs = [DocumentAttributeAudio(
-                duration=info["duration"],
-                title=info["title"][:60],
-                performer=(info["uploader"] or label)[:60],
-            )]
-            send_reply_to = reply_to_msg_id if reply_to_msg_id is not None else getattr(event, "reply_to_msg_id", None)
-            if send_reply_to is None and not is_owned:
-                # Auto-detect path: reply to the incoming message
-                send_reply_to = event.message.id
-            await client.send_file(
-                event.chat_id,
-                info["filepath"],
-                caption=t("music_caption",
-                          title=info["title"][:200],
-                          artist=info["uploader"] or "—",
-                          platform=label),
-                attributes=attrs,
-                thumb=info["thumb"],
-                reply_to=send_reply_to,
-            )
+                sc_results = await asyncio.to_thread(_sc_search_sync, query)
+                targets += [r["url"] for r in sc_results[:3]]
+            except Exception as e:  # noqa: BLE001
+                log.warning(f"[music] SoundCloud fallback search failed: {e}")
+                targets.append(f"scsearch1:{query}")
+        else:
+            targets = [url]
+
+        info = None
+        last_err: Exception | None = None
+        for tgt in targets:
+            tmpdir = tempfile.mkdtemp(prefix="bidar_music_")
             try:
-                await status_msg.delete()
-            except Exception:  # noqa: BLE001
-                pass
-            log.info(f"[music] sent ({platform}): {info['title']}")
-            return True
-        finally:
+                info = await asyncio.to_thread(_music_download_sync, tgt, tmpdir)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                log.warning(f"[music] download failed for target `{tgt[:80]}`: {e}")
+                info = None
+            if info:
+                break
             shutil.rmtree(tmpdir, ignore_errors=True)
+            tmpdir = None
+
+        if not info:
+            err = str(last_err)[:200] if last_err else "no audio found"
+            await status_msg.edit(t("music_failed", platform=label, e=err))
+            return False
+
+        try:
+            await status_msg.edit(t("music_uploading", title=info["title"][:80]))
+        except Exception:  # noqa: BLE001
+            pass
+        attrs = [DocumentAttributeAudio(
+            duration=info["duration"],
+            title=info["title"][:60],
+            performer=(info["uploader"] or label)[:60],
+        )]
+        send_reply_to = reply_to_msg_id if reply_to_msg_id is not None else getattr(event, "reply_to_msg_id", None)
+        if send_reply_to is None and not is_owned:
+            # Auto-detect path: reply to the incoming message
+            send_reply_to = event.message.id
+        await client.send_file(
+            event.chat_id,
+            info["filepath"],
+            caption=t("music_caption",
+                      title=info["title"][:200],
+                      artist=info["uploader"] or "—",
+                      platform=label),
+            attributes=attrs,
+            thumb=info["thumb"],
+            reply_to=send_reply_to,
+        )
+        try:
+            await status_msg.delete()
+        except Exception:  # noqa: BLE001
+            pass
+        log.info(f"[music] sent ({platform}): {info['title']}")
+        return True
     except Exception as e:  # noqa: BLE001
         log.error(f"[music] download/send failed ({platform}): {e}")
         if status_msg is not None:
@@ -1160,6 +1269,9 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
             except Exception:  # noqa: BLE001
                 pass
         return False
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # Backwards-compatible alias: existing call sites still use _sc_download_and_send
@@ -2072,7 +2184,7 @@ async def cmd_allow(event):
             await event.edit(t("allow_here_pv"))
             return
         cid = int(event.chat_id)
-        if cid in allowed:
+        if _whitelist_contains(cid, allowed):
             await event.edit(t("allow_exists", cid=cid))
             return
         allowed.append(cid)
@@ -2083,22 +2195,22 @@ async def cmd_allow(event):
     # `.allow rmhere` — remove current chat
     if sub == "rmhere":
         cid = int(event.chat_id)
-        if cid not in allowed:
+        if not _whitelist_contains(cid, allowed):
             await event.edit(t("allow_notfound", cid=cid))
             return
-        allowed.remove(cid)
+        allowed = _whitelist_without(cid, allowed)
         _save_and_set(allowed)
         await event.edit(t("allow_removed", cid=cid, n=len(allowed)))
         return
 
-    # `.allow add <id>`
+    # `.allow add <id>` — any ID form is accepted (raw `.id` output, -100-marked, …)
     if sub in {"add", "+"}:
         try:
             cid = int(rest)
         except (TypeError, ValueError):
             await event.edit(t("allow_invalid"))
             return
-        if cid in allowed:
+        if _whitelist_contains(cid, allowed):
             await event.edit(t("allow_exists", cid=cid))
             return
         allowed.append(cid)
@@ -2113,10 +2225,10 @@ async def cmd_allow(event):
         except (TypeError, ValueError):
             await event.edit(t("allow_invalid"))
             return
-        if cid not in allowed:
+        if not _whitelist_contains(cid, allowed):
             await event.edit(t("allow_notfound", cid=cid))
             return
-        allowed.remove(cid)
+        allowed = _whitelist_without(cid, allowed)
         _save_and_set(allowed)
         await event.edit(t("allow_removed", cid=cid, n=len(allowed)))
         return
@@ -2176,8 +2288,9 @@ async def cmd_alive(event):
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}id$"))
 @owner_only
 async def cmd_id(event):
-    chat = await event.get_chat()
-    out = t("id_chat", id=chat.id)
+    # Show the marked chat ID (the exact form Telethon events use) so it can be
+    # passed to `.allow add` directly.
+    out = t("id_chat", id=event.chat_id)
     if event.is_reply:
         replied = await event.get_reply_message()
         if replied and replied.sender_id:
@@ -2205,17 +2318,32 @@ async def cmd_help(event):
 @client.on(events.NewMessage(incoming=True))
 async def handle_incoming(event):
     sender = await event.get_sender()
+    if OWNER_ID is not None and getattr(sender, "id", None) == OWNER_ID:
+        return
+    # Music auto-detect (private chats always + whitelisted groups). Also covers
+    # links posted by bots/channels in groups. Runs in the background so it
+    # never blocks the AI/auto-reply flow.
+    asyncio.create_task(_maybe_handle_music_link(event, sender))
     if sender is None or getattr(sender, "bot", False):
         return
-    if OWNER_ID is not None and sender.id == OWNER_ID:
-        return
-    # Music auto-detect (private chats always + whitelisted groups). Runs in
-    # the background so it never blocks the AI/auto-reply flow.
-    asyncio.create_task(_maybe_handle_music_link(event, sender))
     if event.is_private:
         await _handle_private(event, sender)
     else:
         await _handle_group_or_channel(event, sender)
+
+
+# Status/system messages the bot itself sends start with one of these markers —
+# the outgoing music handler must never re-process them.
+_BOT_MSG_PREFIXES = ("🎵", "🔎", "📤", "❌", "✅", "⚠️", "ℹ️", "📋")
+
+
+@client.on(events.NewMessage(outgoing=True))
+async def handle_outgoing_music(event):
+    """Music auto-detect for the owner's own messages (PV + whitelisted groups)."""
+    text = event.raw_text or ""
+    if not text or text.startswith(CMD_PREFIX) or text.startswith(_BOT_MSG_PREFIXES):
+        return
+    asyncio.create_task(_maybe_handle_music_link(event, None))
 
 
 async def _maybe_handle_music_link(event, sender) -> None:
@@ -2234,11 +2362,11 @@ async def _maybe_handle_music_link(event, sender) -> None:
 
     # Authorization scope:
     #   - private chats: always allowed
-    #   - groups/channels: only if chat_id is in allowed_groups whitelist
+    #   - groups/channels: only if the chat is in the allowed_groups whitelist
+    #     (any ID representation — raw, -100-marked or legacy — matches)
     if not event.is_private:
-        allowed = config.get("allowed_groups", []) or []
-        if int(event.chat_id) not in allowed:
-            log.debug(f"[music-auto] skip — chat {event.chat_id} not in whitelist")
+        if not _is_chat_allowed(event.chat_id):
+            log.info(f"[music-auto] skip — chat {event.chat_id} not in whitelist")
             return
 
     # Per-chat dedup: ignore the same URL within 5 minutes
@@ -2256,14 +2384,20 @@ async def _maybe_handle_music_link(event, sender) -> None:
                 _music_recent.pop(k, None)
 
     log.info(
-        f"[music-auto] {platform} link in chat={event.chat_id} from={getattr(sender,'id','?')} "
+        f"[music-auto] {platform} link in chat={event.chat_id} from={getattr(sender,'id','self')} "
         f"drm={is_drm} url={url}"
     )
+    ok = False
     try:
-        await _music_download_and_send(event, url, platform, is_drm,
-                                       reply_to_msg_id=event.message.id)
+        ok = await _music_download_and_send(event, url, platform, is_drm,
+                                            reply_to_msg_id=event.message.id,
+                                            force_reply=True)
     except Exception as e:  # noqa: BLE001
         log.error(f"[music-auto] handler failed: {e}")
+    finally:
+        if not ok:
+            # Allow retrying the same link right after a failure
+            _music_recent.pop(dedup_key, None)
 
 
 async def _handle_private(event, sender) -> None:
@@ -2299,8 +2433,7 @@ async def _handle_group_or_channel(event, sender) -> None:
         return
     # Whitelist: AI in groups only responds in chats present in `allowed_groups`.
     # If the list is empty, AI in groups is effectively disabled.
-    allowed = config.get("allowed_groups", []) or []
-    if int(event.chat_id) not in allowed:
+    if not _is_chat_allowed(event.chat_id):
         log.debug(f"[group-ai] skip — chat {event.chat_id} not in whitelist")
         return
     ready, _ = _ai_ready()

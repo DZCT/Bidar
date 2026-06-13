@@ -286,6 +286,7 @@ class TestAutoDetectFlow(unittest.IsolatedAsyncioTestCase):
 
         async def fake_dl(*a, **kw):
             count["n"] += 1
+            return True  # success keeps the dedup entry
 
         ev = self._mk_event(
             text="https://open.spotify.com/track/dedupe",
@@ -305,7 +306,7 @@ class TestI18N(unittest.TestCase):
     def test_new_keys_present(self):
         keys = [
             "music_downloading", "music_resolving", "music_uploading",
-            "music_failed", "music_caption", "music_set",
+            "music_failed", "music_meta_failed", "music_caption", "music_set",
             "allow_help", "allow_added", "allow_exists", "allow_removed",
             "allow_notfound", "allow_invalid", "allow_list_empty",
             "allow_list_title", "allow_cleared", "allow_here_pv",
@@ -322,6 +323,144 @@ class TestI18N(unittest.TestCase):
         self.assertIn("allow help", en)
         self.assertIn("music on|off", fa)
         self.assertIn("allow help", fa)
+
+
+# ────────────────────────────────────────────────────────────────────
+# 6. v1.9.1 fixes: shortlinks, chat-ID variants, outgoing links, dedup retry
+# ────────────────────────────────────────────────────────────────────
+class TestShortlinkDetection(unittest.TestCase):
+    def test_on_soundcloud_shortlink_detected(self):
+        got = bidar._detect_music_url("https://on.soundcloud.com/aquUJPmourEr5c6Lul")
+        self.assertIsNotNone(got)
+        self.assertEqual(got[0], "soundcloud")
+        self.assertFalse(got[2])
+
+    def test_spotify_link_short_detected_as_drm(self):
+        got = bidar._detect_music_url("listen https://spotify.link/AbC123xyz now")
+        self.assertIsNotNone(got)
+        self.assertEqual(got[0], "spotify")
+        self.assertTrue(got[2])
+
+    def test_deezer_page_link_detected_as_drm(self):
+        got = bidar._detect_music_url("https://deezer.page.link/XyZ987")
+        self.assertIsNotNone(got)
+        self.assertEqual(got[0], "deezer")
+        self.assertTrue(got[2])
+
+    def test_shortlink_re_matches_only_drm_shorteners(self):
+        self.assertTrue(bidar._SHORTLINK_RE.match("https://spotify.link/abc"))
+        self.assertTrue(bidar._SHORTLINK_RE.match("https://deezer.page.link/x"))
+        self.assertIsNone(bidar._SHORTLINK_RE.match("https://on.soundcloud.com/x"))
+        self.assertIsNone(bidar._SHORTLINK_RE.match("https://open.spotify.com/track/x"))
+
+
+class TestChatIdVariants(unittest.TestCase):
+    def test_marked_supergroup_includes_raw(self):
+        v = bidar._chat_id_variants(-1002453861964)
+        self.assertIn(2453861964, v)
+        self.assertIn(-1002453861964, v)
+
+    def test_raw_positive_includes_marked(self):
+        v = bidar._chat_id_variants(2453861964)
+        self.assertIn(-1002453861964, v)
+
+    def test_legacy_group_includes_positive(self):
+        v = bidar._chat_id_variants(-456789)
+        self.assertIn(456789, v)
+        self.assertIn(-100456789, v)
+
+    def test_invalid_returns_empty(self):
+        self.assertEqual(bidar._chat_id_variants("abc"), set())
+
+    def test_is_chat_allowed_raw_id_matches_marked_chat(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["allowed_groups"] = [2453861964]  # raw `.id`-style entry
+        self.assertTrue(bidar._is_chat_allowed(-1002453861964))
+
+    def test_is_chat_allowed_marked_entry_matches(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["allowed_groups"] = [-1002453861964]
+        self.assertTrue(bidar._is_chat_allowed(-1002453861964))
+
+    def test_is_chat_allowed_rejects_other_chat(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["allowed_groups"] = [111222333]
+        self.assertFalse(bidar._is_chat_allowed(-1009998887776))
+
+    def test_whitelist_contains_and_without(self):
+        lst = [2453861964, -100555]
+        self.assertTrue(bidar._whitelist_contains(-1002453861964, lst))
+        remaining = bidar._whitelist_without(-1002453861964, lst)
+        self.assertEqual(remaining, [-100555])
+
+
+class TestAutoDetectV191(unittest.IsolatedAsyncioTestCase):
+    def _mk_event(self, *, text, chat_id, is_private):
+        ev = MagicMock()
+        ev.raw_text = text
+        ev.chat_id = chat_id
+        ev.is_private = is_private
+        ev.message = MagicMock()
+        ev.message.id = 42
+        return ev
+
+    async def test_group_raw_id_whitelist_triggers(self):
+        """Group stored with raw positive `.id` output must still trigger."""
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["music_enabled"] = True
+        bidar.config["allowed_groups"] = [2453861964]
+        bidar.YTDLP_OK = True
+        bidar._music_recent.clear()
+        called = {"n": 0}
+
+        async def fake_dl(*a, **kw):
+            called["n"] += 1
+            return True
+
+        ev = self._mk_event(text="https://soundcloud.com/foo/bar",
+                            chat_id=-1002453861964, is_private=False)
+        with patch.object(bidar, "_music_download_and_send", side_effect=fake_dl):
+            await bidar._maybe_handle_music_link(ev, MagicMock(id=1, bot=False))
+        self.assertEqual(called["n"], 1)
+
+    async def test_outgoing_owner_message_sender_none(self):
+        """Owner's own (outgoing) link → sender=None must still work in PV."""
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["music_enabled"] = True
+        bidar.YTDLP_OK = True
+        bidar._music_recent.clear()
+        called = {"kw": None}
+
+        async def fake_dl(event, url, platform, is_drm, **kw):
+            called["kw"] = kw
+            return True
+
+        ev = self._mk_event(text="https://on.soundcloud.com/abc123",
+                            chat_id=555, is_private=True)
+        with patch.object(bidar, "_music_download_and_send", side_effect=fake_dl):
+            await bidar._maybe_handle_music_link(ev, None)
+        self.assertIsNotNone(called["kw"])
+        self.assertTrue(called["kw"].get("force_reply"))
+
+    async def test_failed_download_clears_dedup_for_retry(self):
+        """A failed download must NOT block an immediate retry of the same link."""
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["music_enabled"] = True
+        bidar.YTDLP_OK = True
+        bidar._music_recent.clear()
+        count = {"n": 0}
+
+        async def fake_dl(*a, **kw):
+            count["n"] += 1
+            return False  # simulate failure
+
+        ev = self._mk_event(text="https://soundcloud.com/retry/me",
+                            chat_id=777, is_private=True)
+        sender = MagicMock(id=111, bot=False)
+        with patch.object(bidar, "_music_download_and_send", side_effect=fake_dl):
+            await bidar._maybe_handle_music_link(ev, sender)
+            await bidar._maybe_handle_music_link(ev, sender)  # retry after failure
+        self.assertEqual(count["n"], 2)
 
 
 if __name__ == "__main__":

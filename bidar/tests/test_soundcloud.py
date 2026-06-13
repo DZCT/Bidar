@@ -37,7 +37,7 @@ def check(name: str, cond: bool, detail: str = ""):
 
 
 def test_url_regex():
-    print("\n── URL detection (_SC_URL_RE) ──")
+    print("\n── URL detection (_detect_music_url / soundcloud) ──")
     yes = [
         "https://soundcloud.com/artist/track",
         "http://soundcloud.com/a/b",
@@ -49,14 +49,14 @@ def test_url_regex():
     ]
     no = [
         "shadmehr aghili setareh",
-        "https://youtube.com/watch?v=x",
         "soundcloud.com/no-scheme",  # no scheme → treated as search query
         "2",
     ]
     for u in yes:
-        check(f"matches: {u[:60]}", bidar._SC_URL_RE.search(u) is not None)
+        got = bidar._detect_music_url(u)
+        check(f"matches: {u[:60]}", got is not None and got[0] == "soundcloud")
     for u in no:
-        check(f"no match: {u[:60]}", bidar._SC_URL_RE.search(u) is None)
+        check(f"no match: {u[:60]}", bidar._detect_music_url(u) is None)
 
 
 def test_fmt_duration():
@@ -145,7 +145,7 @@ def test_arg_routing():
         arg = arg.strip()
         if arg.isdigit():
             return "pick"
-        if bidar._SC_URL_RE.search(arg):
+        if bidar._detect_music_url(arg):
             return "link"
         return "search"
 
