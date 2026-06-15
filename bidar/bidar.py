@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.9.3"
+VERSION = "1.9.4"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -107,6 +107,8 @@ _DEFAULT_CONFIG = {
     "translate_target": "fa",
     # Image generation
     "image_model": "gemini-3.1-flash-image-preview",
+    # Default aspect ratio for .img / .imgedit (see SUPPORTED_AR for valid values).
+    "image_aspect_ratio": "1:1",
     # UI language
     "bot_lang": "en",  # "en" or "fa"
     # Music (auto-detect & download from any platform)
@@ -293,10 +295,11 @@ I18N = {
 
     # Image
     "img_usage": {
-        "en": "🎨 **Image generation**\n\n  `{p}img <description>`\n\n📝 Examples:\n  `{p}img a fluffy cat astronaut on Mars`\n  `{p}img minimalist watercolor of mountains at sunset`\n\n🎯 Current model: `{m}`",
-        "fa": "🎨 **تولید تصویر**\n\n  `{p}img <توضیح تصویر>`\n\n📝 مثال:\n  `{p}img a fluffy cat astronaut on Mars`\n  `{p}img نقاشی مینیمال از کوه‌های دماوند هنگام غروب`\n\n🎯 مدل فعلی: `{m}`",
+        "en": "🎨 **Image generation**\n\n  `{p}img <description>`\n  `{p}img --ar 16:9 <description>` — override aspect ratio\n  `{p}img --portrait <description>` — friendly alias\n\n📝 Examples:\n  `{p}img a fluffy cat astronaut on Mars`\n  `{p}img --16:9 cinematic shot of a dragon over Tehran`\n  `{p}img --story a minimalist watercolor of mountains`\n\n🎯 Current model: `{m}`\n📐 Current aspect ratio: `{ar}` (`{p}imgsize` to change)",
+        "fa": "🎨 **تولید تصویر**\n\n  `{p}img <توضیح تصویر>`\n  `{p}img --ar 16:9 <توضیح>` — تغییر ابعاد برای همین تصویر\n  `{p}img --استوری <توضیح>` — نام دوستانه\n\n📝 مثال:\n  `{p}img a fluffy cat astronaut on Mars`\n  `{p}img --16:9 نمای سینمایی از اژدها روی تهران`\n  `{p}img --استوری نقاشی مینیمال از کوه‌های دماوند`\n\n🎯 مدل فعلی: `{m}`\n📐 ابعاد فعلی: `{ar}` (با `{p}imgsize` عوض کن)",
     },
-    "img_processing": {"en": "🎨 Generating image...\n_{p}_", "fa": "🎨 در حال تولید تصویر...\n_{p}_"},
+    "img_processing": {"en": "🎨 Generating image ({ar})...\n_{p}_",
+                        "fa": "🎨 در حال تولید تصویر ({ar})...\n_{p}_"},
     "img_failed": {
         "en": "❌ Image generation failed.\nCheck: AI is on, EMERGENT_LLM_KEY is set, prompt is appropriate.",
         "fa": "❌ تولید تصویر ناموفق بود.\nبررسی کن: AI روشن باشه، EMERGENT_LLM_KEY ست شده باشه، prompt مناسب باشه.",
@@ -307,6 +310,20 @@ I18N = {
         "fa": "🎨 **مدل تولید تصویر:** `{m}`\n\n🌟 مدل‌های موجود:\n  `{p}imgmodel gemini-3.1-flash-image-preview` ⚡ (پیش‌فرض، Nano Banana)\n  `{p}imgmodel gemini-3-pro-image-preview` 🔥 (Pro، کیفیت بالاتر)",
     },
     "imgmodel_set": {"en": "✅ Image model set to `{m}`.", "fa": "✅ مدل تولید تصویر به `{m}` تنظیم شد."},
+
+    # Image aspect ratio
+    "imgsize_show": {
+        "en": "📐 **Image aspect ratio:** `{ar}`\n\n🌟 Supported:\n  `1:1` square · `16:9` landscape · `9:16` portrait / story\n  `4:3` classic · `3:4` tall · `21:9` cinematic\n  `3:2`, `2:3`, `5:4`, `4:5`, `4:1`, `1:4`, `8:1`, `1:8`\n\n🪄 Friendly aliases (Persian/English):\n  `square / مربعی` · `landscape / افقی` · `portrait / عمودی`\n  `story / استوری` · `cinematic / سینمایی` · `photo / عکس`\n\n📝 Examples:\n  `{p}imgsize 16:9`\n  `{p}imgsize portrait`\n  `{p}imgsize استوری`\n\n💡 Per-image override (no permanent change):\n  `{p}img --ar 9:16 <prompt>` or `{p}img --landscape <prompt>`",
+        "fa": "📐 **ابعاد تصویر:** `{ar}`\n\n🌟 ابعاد پشتیبانی‌شده:\n  `1:1` مربعی · `16:9` افقی · `9:16` عمودی/استوری\n  `4:3` کلاسیک · `3:4` بلند · `21:9` سینمایی\n  `3:2`, `2:3`, `5:4`, `4:5`, `4:1`, `1:4`, `8:1`, `1:8`\n\n🪄 نام‌های دوستانه (فارسی/انگلیسی):\n  `مربعی / square` · `افقی / landscape` · `عمودی / portrait`\n  `استوری / story` · `سینمایی / cinematic` · `عکس / photo`\n\n📝 مثال:\n  `{p}imgsize 16:9`\n  `{p}imgsize portrait`\n  `{p}imgsize استوری`\n\n💡 برای یک عکس خاص بدون تغییر پیش‌فرض:\n  `{p}img --ar 9:16 <prompt>` یا `{p}img --استوری <prompt>`",
+    },
+    "imgsize_set": {
+        "en": "✅ Image aspect ratio set to `{ar}`.",
+        "fa": "✅ ابعاد تصویر روی `{ar}` تنظیم شد.",
+    },
+    "imgsize_invalid": {
+        "en": "⚠️ Invalid aspect ratio `{a}`.\nUse one of: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `3:2`, `2:3`, `5:4`, `4:5`, `4:1`, `1:4`, `8:1`, `1:8`\nor a friendly alias: `square`, `landscape`, `portrait`, `story`, `cinematic`, `photo`, `مربعی`, `افقی`, `عمودی`, `استوری`, `سینمایی`, `عکس`.",
+        "fa": "⚠️ ابعاد `{a}` معتبر نیست.\nیکی از این‌ها رو استفاده کن: `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, `21:9`, `3:2`, `2:3`, `5:4`, `4:5`, `4:1`, `1:4`, `8:1`, `1:8`\nیا نام‌های دوستانه: `square`, `landscape`, `portrait`, `story`, `cinematic`, `photo`, `مربعی`, `افقی`, `عمودی`, `استوری`, `سینمایی`, `عکس`.",
+    },
 
     # Image edit
     "imgedit_usage": {
@@ -515,9 +532,11 @@ I18N = {
             "     example: `{p}to en سلام چطوری`\n\n"
             "🎨 **Image**\n"
             "  `{p}img <description>` — generate image (Nano Banana)\n"
+            "     supports `--ar 16:9` / `--landscape` / `--portrait` flags\n"
             "  `{p}imgedit <change>` — edit image (reply to image)\n"
             "  `{p}ocr` — extract text from image (reply to image)\n"
-            "  `{p}imgmodel <model>` — change image model\n\n"
+            "  `{p}imgmodel <model>` — change image model\n"
+            "  `{p}imgsize [ratio]` — view/set default aspect ratio\n\n"
             "🔎 **Search**\n"
             "  `{p}search <query>` — search normal chats → saves .txt file\n"
             "  `{p}searchall <query>` — search **only** restricted/blocked channels\n\n"
@@ -566,9 +585,11 @@ I18N = {
             "     مثال: `{p}to en سلام چطوری`\n\n"
             "🎨 **تصویر**\n"
             "  `{p}img <توضیح>` — تولید تصویر با Nano Banana\n"
+            "     قابل ترکیب با `--ar 16:9` / `--افقی` / `--استوری`\n"
             "  `{p}imgedit <توضیح>` — ویرایش عکس (روی عکس reply بزن)\n"
             "  `{p}ocr` — استخراج متن از عکس (روی عکس reply بزن)\n"
-            "  `{p}imgmodel <model>` — تغییر مدل تصویر\n\n"
+            "  `{p}imgmodel <model>` — تغییر مدل تصویر\n"
+            "  `{p}imgsize [ابعاد]` — نمایش/تنظیم ابعاد پیش‌فرض\n\n"
             "🔎 **جستجو**\n"
             "  `{p}search <متن>` — جستجو در چت‌های عادی → فایل .txt میده\n"
             "  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های محدود/مسدود\n\n"
@@ -726,11 +747,77 @@ async def _translate_text(text: str, target_lang: str) -> str | None:
         return None
 
 
-async def _generate_image(prompt: str) -> bytes | None:
+# ────────── Image aspect-ratio helpers ──────────
+# Aspect ratios supported by Gemini Nano Banana / Pro Image models
+SUPPORTED_AR: tuple[str, ...] = (
+    "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5",
+    "16:9", "9:16", "21:9", "1:4", "4:1", "1:8", "8:1",
+)
+
+# Friendly aliases (English & Persian) for the most common ratios
+AR_ALIASES: dict[str, str] = {
+    # square
+    "square": "1:1", "sq": "1:1", "مربع": "1:1", "مربعی": "1:1",
+    # landscape / wide
+    "landscape": "16:9", "wide": "16:9", "horizontal": "16:9", "hd": "16:9",
+    "افقی": "16:9", "عریض": "16:9", "منظره": "16:9",
+    # portrait / story
+    "portrait": "9:16", "vertical": "9:16", "story": "9:16", "reel": "9:16", "tall": "9:16",
+    "عمودی": "9:16", "استوری": "9:16", "ریل": "9:16", "پرتره": "9:16",
+    # cinematic
+    "cinematic": "21:9", "cinema": "21:9", "ultrawide": "21:9", "سینمایی": "21:9",
+    # photo
+    "photo": "3:2", "dslr": "3:2", "عکس": "3:2",
+    # classic
+    "classic": "4:3", "tv": "4:3",
+}
+
+
+def _parse_aspect_ratio(s: str | None) -> str | None:
+    """Return a valid 'W:H' string or None if `s` is not recognized."""
+    if not s:
+        return None
+    s = s.strip().lower().replace("×", ":").replace("x", ":")
+    if s in AR_ALIASES:
+        return AR_ALIASES[s]
+    if s in SUPPORTED_AR:
+        return s
+    # Tolerate "16x9", "16 9", "9÷16" etc.
+    m = re.match(r"^\s*(\d+)\s*[:/x×\-\s]\s*(\d+)\s*$", s)
+    if m:
+        canonical = f"{int(m.group(1))}:{int(m.group(2))}"
+        if canonical in SUPPORTED_AR:
+            return canonical
+    return None
+
+
+def _extract_ar_flag(text: str) -> tuple[str | None, str]:
+    """Pull an inline `--ar 16:9` / `--16:9` / `--landscape` flag out of `text`.
+
+    Returns (aspect_ratio_or_None, cleaned_prompt_without_flag).
+    """
+    # `--ar VALUE`  /  `-ar VALUE`
+    m = re.search(r"(?:^|\s)-{1,2}ar\s+(\S+)", text, re.I)
+    if m:
+        ar = _parse_aspect_ratio(m.group(1))
+        if ar:
+            return ar, (text[:m.start()] + " " + text[m.end():]).strip()
+    # `--16:9` / `--landscape` shorthand
+    m = re.search(r"(?:^|\s)-{1,2}([\w:×x]+)\b", text)
+    if m:
+        ar = _parse_aspect_ratio(m.group(1))
+        if ar:
+            return ar, (text[:m.start()] + " " + text[m.end():]).strip()
+    return None, text
+
+
+# ────────── LLM helpers ──────────
+async def _generate_image(prompt: str, aspect_ratio: str | None = None) -> bytes | None:
     ready, _ = _ai_ready()
     if not ready or not prompt.strip():
         return None
     model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
+    ar = aspect_ratio or config.get("image_aspect_ratio", "1:1")
     try:
         chat = (
             LlmChat(
@@ -739,7 +826,8 @@ async def _generate_image(prompt: str) -> bytes | None:
                 system_message="You are an expert image generator. Create high-quality, detailed images based on the user's prompt.",
             )
             .with_model("gemini", model_name)
-            .with_params(modalities=["image", "text"])
+            .with_params(modalities=["image", "text"],
+                         image_config={"aspect_ratio": ar})
         )
         _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt))
         if not images:
@@ -751,11 +839,12 @@ async def _generate_image(prompt: str) -> bytes | None:
         return None
 
 
-async def _edit_image(image_bytes: bytes, edit_prompt: str) -> bytes | None:
+async def _edit_image(image_bytes: bytes, edit_prompt: str, aspect_ratio: str | None = None) -> bytes | None:
     ready, _ = _ai_ready()
     if not ready or not edit_prompt.strip() or not image_bytes:
         return None
     model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
+    ar = aspect_ratio or config.get("image_aspect_ratio", "1:1")
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         chat = (
@@ -765,7 +854,8 @@ async def _edit_image(image_bytes: bytes, edit_prompt: str) -> bytes | None:
                 system_message="You are an expert image editor. Edit the given reference image based on the user's instructions while preserving the main subject's identity unless told otherwise.",
             )
             .with_model("gemini", model_name)
-            .with_params(modalities=["image", "text"])
+            .with_params(modalities=["image", "text"],
+                         image_config={"aspect_ratio": ar})
         )
         msg = UserMessage(text=edit_prompt, file_contents=[ImageContent(image_b64)])
         _text, images = await chat.send_message_multimodal_response(msg)
@@ -2032,11 +2122,20 @@ async def cmd_image(event):
     if not prompt or not prompt.strip():
         await event.edit(t("img_usage",
                            p=CMD_PREFIX,
-                           m=config.get("image_model", "gemini-3.1-flash-image-preview")))
+                           m=config.get("image_model", "gemini-3.1-flash-image-preview"),
+                           ar=config.get("image_aspect_ratio", "1:1")))
         return
-    prompt = prompt.strip()
-    msg = await event.edit(t("img_processing", p=prompt[:100]))
-    img_bytes = await _generate_image(prompt)
+    # Extract optional `--ar` / `--<alias>` flag from the prompt
+    ar_override, prompt = _extract_ar_flag(prompt.strip())
+    if not prompt:
+        await event.edit(t("img_usage",
+                           p=CMD_PREFIX,
+                           m=config.get("image_model", "gemini-3.1-flash-image-preview"),
+                           ar=config.get("image_aspect_ratio", "1:1")))
+        return
+    effective_ar = ar_override or config.get("image_aspect_ratio", "1:1")
+    msg = await event.edit(t("img_processing", p=prompt[:100], ar=effective_ar))
+    img_bytes = await _generate_image(prompt, aspect_ratio=ar_override)
     if not img_bytes:
         await msg.edit(t("img_failed"))
         return
@@ -2076,6 +2175,23 @@ async def cmd_imgmodel(event):
     await event.edit(t("imgmodel_set", m=arg))
 
 
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}imgsize(?:\s+(\S+))?$"))
+@owner_only
+async def cmd_imgsize(event):
+    arg = event.pattern_match.group(1)
+    current = config.get("image_aspect_ratio", "1:1")
+    if arg is None:
+        await event.edit(t("imgsize_show", ar=current, p=CMD_PREFIX))
+        return
+    ar = _parse_aspect_ratio(arg)
+    if not ar:
+        await event.edit(t("imgsize_invalid", a=arg))
+        return
+    config["image_aspect_ratio"] = ar
+    save_config()
+    await event.edit(t("imgsize_set", ar=ar))
+
+
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}imgedit(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_imgedit(event):
@@ -2086,7 +2202,11 @@ async def cmd_imgedit(event):
     if not event.is_reply:
         await event.edit(t("imgedit_need_reply"))
         return
-    prompt = prompt.strip()
+    # Same `--ar` / `--<alias>` override mechanism as `.img`
+    ar_override, prompt = _extract_ar_flag(prompt.strip())
+    if not prompt:
+        await event.edit(t("imgedit_usage", p=CMD_PREFIX))
+        return
     msg = await event.edit(t("imgedit_processing", p=prompt[:100]))
     try:
         replied = await event.get_reply_message()
@@ -2104,7 +2224,7 @@ async def cmd_imgedit(event):
     if not img_bytes or not isinstance(img_bytes, bytes):
         await msg.edit(t("imgedit_invalid"))
         return
-    edited_bytes = await _edit_image(img_bytes, prompt)
+    edited_bytes = await _edit_image(img_bytes, prompt, aspect_ratio=ar_override)
     if not edited_bytes:
         await msg.edit(t("imgedit_failed"))
         return
@@ -2406,6 +2526,7 @@ async def cmd_stats(event):
         f"  {t('stats_ai_groupcd')}: `{config.get('group_cooldown', 0)}s`"
         f"{(' ' + t('no_limit')) if config.get('group_cooldown', 0) == 0 else ''}\n"
         f"  {t('stats_ai_sessions')}: `{len(_chat_sessions)}`\n\n"
+        f"🎨 Image: `{config.get('image_model','-')}`  📐 `{config.get('image_aspect_ratio','1:1')}`\n"
         f"🎵 Music auto-detect: `{music_state}`\n"
         f"📋 Allowed groups: `{len(allowed)}`\n\n"
         f"{t('stats_received')}: `{stats['messages_received']}`\n"

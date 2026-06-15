@@ -125,6 +125,16 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.9.4 — Image Aspect-Ratio Control (Completed Jun 2026)
+- ✅ New config key `image_aspect_ratio` (default `1:1`) + `.imgsize` command to view/set it
+- ✅ `.img` and `.imgedit` accept inline `--ar 16:9` / `--landscape` / `--استوری` flags (per-image override without changing default)
+- ✅ Friendly aliases: `square / مربعی`, `landscape / افقی`, `portrait / story / عمودی / استوری`, `cinematic / سینمایی`, `photo / عکس`, `tv / classic`
+- ✅ Tolerant input parser: `16x9`, `16×9`, `16/9`, `16:9` all work
+- ✅ Passed to Gemini Nano Banana / Pro Image via `image_config={"aspect_ratio": "..."}` through emergentintegrations' LlmChat → litellm → Google `generation_config.image_config`
+- ✅ Live verified with real key: 1:1 → 1024×1024, 16:9 → 1376×768, 9:16 → 768×1376, 4:3 → 1200×896, 3:4 → 896×1200, 21:9 → 1584×672, 3:2 → 1264×848
+- ✅ Supported ratios: `1:1, 16:9, 9:16, 4:3, 3:4, 21:9, 3:2, 2:3, 5:4, 4:5, 4:1, 1:4, 8:1, 1:8`
+- ✅ Tests: **72 passing** (+13 new for aspect-ratio parser, flag extractor, generate_image AR passthrough)
+
 ## Commands Summary (v1.9.1)
 **Total: 33+ commands**, all `@owner_only`
 

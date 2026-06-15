@@ -581,5 +581,117 @@ class TestDownloadSyncVideoFallback(unittest.TestCase):
             _sh.rmtree(tmp, ignore_errors=True)
 
 
+# ────────────────────────────────────────────────────────────────────
+# 8. v1.9.4: image aspect-ratio helpers
+# ────────────────────────────────────────────────────────────────────
+class TestAspectRatio(unittest.TestCase):
+    def test_canonical_ratios(self):
+        for ar in ("1:1", "16:9", "9:16", "4:3", "3:4", "21:9",
+                   "3:2", "2:3", "5:4", "4:5", "1:4", "4:1", "1:8", "8:1"):
+            self.assertEqual(bidar._parse_aspect_ratio(ar), ar, ar)
+
+    def test_english_aliases(self):
+        self.assertEqual(bidar._parse_aspect_ratio("square"), "1:1")
+        self.assertEqual(bidar._parse_aspect_ratio("LANDSCAPE"), "16:9")
+        self.assertEqual(bidar._parse_aspect_ratio("portrait"), "9:16")
+        self.assertEqual(bidar._parse_aspect_ratio("story"), "9:16")
+        self.assertEqual(bidar._parse_aspect_ratio("cinematic"), "21:9")
+        self.assertEqual(bidar._parse_aspect_ratio("photo"), "3:2")
+        self.assertEqual(bidar._parse_aspect_ratio("tv"), "4:3")
+
+    def test_persian_aliases(self):
+        self.assertEqual(bidar._parse_aspect_ratio("مربعی"), "1:1")
+        self.assertEqual(bidar._parse_aspect_ratio("افقی"), "16:9")
+        self.assertEqual(bidar._parse_aspect_ratio("عمودی"), "9:16")
+        self.assertEqual(bidar._parse_aspect_ratio("استوری"), "9:16")
+        self.assertEqual(bidar._parse_aspect_ratio("سینمایی"), "21:9")
+        self.assertEqual(bidar._parse_aspect_ratio("عکس"), "3:2")
+
+    def test_tolerant_separators(self):
+        self.assertEqual(bidar._parse_aspect_ratio("16x9"), "16:9")
+        self.assertEqual(bidar._parse_aspect_ratio("16X9"), "16:9")
+        self.assertEqual(bidar._parse_aspect_ratio("16×9"), "16:9")
+        self.assertEqual(bidar._parse_aspect_ratio(" 9 / 16 "), "9:16")
+
+    def test_invalid(self):
+        self.assertIsNone(bidar._parse_aspect_ratio(""))
+        self.assertIsNone(bidar._parse_aspect_ratio(None))
+        self.assertIsNone(bidar._parse_aspect_ratio("100:1"))
+        self.assertIsNone(bidar._parse_aspect_ratio("garbage"))
+        self.assertIsNone(bidar._parse_aspect_ratio("0:0"))
+        # `4:5` IS supported by Gemini
+        self.assertEqual(bidar._parse_aspect_ratio("4:5"), "4:5")
+
+    def test_extract_flag_ar(self):
+        ar, p = bidar._extract_ar_flag("--ar 16:9 a red apple on white")
+        self.assertEqual(ar, "16:9")
+        self.assertEqual(p, "a red apple on white")
+
+    def test_extract_flag_shorthand(self):
+        ar, p = bidar._extract_ar_flag("a moody portrait --9:16")
+        self.assertEqual(ar, "9:16")
+        self.assertEqual(p, "a moody portrait")
+
+    def test_extract_flag_alias(self):
+        ar, p = bidar._extract_ar_flag("--landscape sunset over mountains")
+        self.assertEqual(ar, "16:9")
+        self.assertEqual(p, "sunset over mountains")
+
+    def test_extract_flag_persian_alias(self):
+        ar, p = bidar._extract_ar_flag("--استوری یه نقاشی مینیمال از کوه")
+        self.assertEqual(ar, "9:16")
+        self.assertEqual(p, "یه نقاشی مینیمال از کوه")
+
+    def test_extract_no_flag(self):
+        ar, p = bidar._extract_ar_flag("a red apple on white")
+        self.assertIsNone(ar)
+        self.assertEqual(p, "a red apple on white")
+
+    def test_default_in_config(self):
+        self.assertEqual(bidar._DEFAULT_CONFIG["image_aspect_ratio"], "1:1")
+
+
+class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
+    async def test_uses_config_default(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["image_aspect_ratio"] = "16:9"
+        bidar.config["ai_enabled"] = True
+        # Capture the with_params call
+        captured = {}
+
+        class FakeChat:
+            def with_model(self, *a, **kw): return self
+            def with_params(self, **kw):
+                captured.update(kw)
+                return self
+            async def send_message_multimodal_response(self, *a, **kw):
+                return ("", [{"data": __import__("base64").b64encode(b"PNGdata").decode()}])
+
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=FakeChat()):
+            out = await bidar._generate_image("a cat")
+        self.assertIsNotNone(out)
+        self.assertEqual(captured.get("image_config"), {"aspect_ratio": "16:9"})
+
+    async def test_explicit_override_wins(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["image_aspect_ratio"] = "1:1"
+        bidar.config["ai_enabled"] = True
+        captured = {}
+
+        class FakeChat:
+            def with_model(self, *a, **kw): return self
+            def with_params(self, **kw):
+                captured.update(kw)
+                return self
+            async def send_message_multimodal_response(self, *a, **kw):
+                return ("", [{"data": __import__("base64").b64encode(b"PNG").decode()}])
+
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=FakeChat()):
+            await bidar._generate_image("a dog", aspect_ratio="9:16")
+        self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
