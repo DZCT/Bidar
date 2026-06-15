@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.9.2-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.9.3-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -316,7 +316,7 @@ sudo systemctl enable --now bidar
 | پلتفرم | روش دانلود |
 |:---:|:---|
 | 🎧 **SoundCloud** | مستقیم (لینک کوتاه `on.soundcloud.com` هم پشتیبانی میشه) |
-| ▶️ **YouTube / YouTube Music** | مستقیم |
+| ▶️ **YouTube Music** | فقط `music.youtube.com` — لینک‌های ویدیوی عادی یوتیوب نادیده گرفته میشن |
 | 🎵 **Bandcamp** | مستقیم |
 | 🎚 **Mixcloud** | مستقیم |
 | 🎶 **Yandex Music** | مستقیم |

@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.9.2"
+VERSION = "1.9.3"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -818,7 +818,9 @@ async def _ocr_image(image_bytes: bytes) -> str | None:
 # Platform detection patterns. Order matters — first match wins.
 _MUSIC_PLATFORMS: list[tuple[str, re.Pattern, bool]] = [
     # (name, regex, is_drm_protected)
-    ("youtube",   re.compile(r"https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?[^\s]*v=|shorts/|playlist\?list=)|youtu\.be/)[\w\-]+(?:[?&][^\s]*)?", re.I), False),
+    # Only `music.youtube.com` — regular YouTube video links are intentionally
+    # excluded so the bot doesn't auto-convert every video into an audio file.
+    ("youtube",   re.compile(r"https?://music\.youtube\.com/(?:watch\?[^\s]*v=|playlist\?list=)[\w\-]+(?:[?&][^\s]*)?", re.I), False),
     # Any subdomain (www / m / on.soundcloud.com mobile share-links) is valid
     ("soundcloud",re.compile(r"https?://(?:[\w-]+\.)?(?:soundcloud\.com|snd\.sc)/[\w\-/?=&%.#]+", re.I), False),
     ("bandcamp",  re.compile(r"https?://[\w\-]+\.bandcamp\.com/(?:track|album)/[\w\-]+", re.I), False),
@@ -836,7 +838,7 @@ _MUSIC_PLATFORMS: list[tuple[str, re.Pattern, bool]] = [
 ]
 
 _PLATFORM_LABEL = {
-    "youtube": "YouTube",
+    "youtube": "YouTube Music",
     "soundcloud": "SoundCloud",
     "bandcamp": "Bandcamp",
     "mixcloud": "Mixcloud",

@@ -120,6 +120,11 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ NOTE: user's Apple album test link `…/blinding-lights/1499385311?i=1499385316` is a **dead link (HTTP 404, removed from catalog)** — correctly reports "Couldn't read track info"; valid album links with `?i=` now work.
 - ✅ Tests: **59 passing** (12 new: clean-query, iTunes/Deezer/oEmbed lookups mocked, mp4 fallback, .part skip).
 
+### v1.9.3 — YouTube Music–Only (Completed Jun 2026)
+- ✅ **Only `music.youtube.com`** URLs are treated as music. Plain `youtube.com/watch`, `youtu.be`, `youtube.com/shorts`, `m.youtube.com` are intentionally ignored (auto-detect and `.sc <link>`) so the bot doesn't turn every shared video into an audio file.
+- ✅ Platform label renamed to "YouTube Music" in audio captions.
+- ✅ Regression test (`test_youtube_music_only`) added.
+
 ## Commands Summary (v1.9.1)
 **Total: 33+ commands**, all `@owner_only`
 

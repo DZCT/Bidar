@@ -35,17 +35,23 @@ class TestUrlDetection(unittest.TestCase):
         self.assertEqual(got[0], "soundcloud")
         self.assertFalse(got[2])
 
-    def test_youtube_url(self):
+    def test_youtube_music_only(self):
+        """Only music.youtube.com is treated as music — regular video links are ignored."""
+        # Music: detected as YouTube Music
+        got = bidar._detect_music_url("https://music.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertIsNotNone(got)
+        self.assertEqual(got[0], "youtube")
+        got = bidar._detect_music_url("https://music.youtube.com/playlist?list=PLabc123")
+        self.assertIsNotNone(got)
+        self.assertEqual(got[0], "youtube")
+        # Regular YouTube video / short links must NOT be auto-handled
         for url in [
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "https://youtu.be/dQw4w9WgXcQ",
-            "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
             "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtube.com/shorts/abc",
         ]:
-            got = bidar._detect_music_url(f"listen: {url} now")
-            self.assertIsNotNone(got, msg=f"Failed: {url}")
-            self.assertEqual(got[0], "youtube", msg=url)
-            self.assertFalse(got[2])
+            self.assertIsNone(bidar._detect_music_url(url), msg=f"should be ignored: {url}")
 
     def test_spotify_url(self):
         got = bidar._detect_music_url(
