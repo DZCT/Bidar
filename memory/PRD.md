@@ -1,4 +1,4 @@
-# PRD — Bidar v1.9.2 (Always Online Telegram Userbot + AI Assistant)
+# PRD — Bidar v1.9.5 (Always Online Telegram Userbot + AI Assistant)
 
 ## Problem Statement
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
@@ -124,6 +124,19 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ **Only `music.youtube.com`** URLs are treated as music. Plain `youtube.com/watch`, `youtu.be`, `youtube.com/shorts`, `m.youtube.com` are intentionally ignored (auto-detect and `.sc <link>`) so the bot doesn't turn every shared video into an audio file.
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
+
+### v1.9.5 — Real Image Errors Surfaced (Completed Jun 2026)
+User reported: `.img` with a long detailed prompt (real-person + Mercedes brand) returned only generic "Image generation failed. Check: AI is on, EMERGENT_LLM_KEY is set, prompt is appropriate." — impossible to know whether it was budget, safety filter, rate limit, or invalid key.
+- ✅ `_generate_image` / `_edit_image` now return `(bytes | None, error_msg | None)` instead of swallowing exceptions
+- ✅ New `_friendly_image_error()` maps raw Gemini/litellm errors to actionable bilingual messages:
+  - `Budget has been exceeded` → "💸 اعتبار Emergent Key تموم شده. از Profile → Universal Key شارژ کن"
+  - safety / blocked / no images returned → "🛡 پرامپت توسط فیلتر امنیتی Gemini مسدود شد. برند رو حذف کن، توصیف چهره/سن/پوست واقعی نده"
+  - rate limit → "⏳ محدودیت تعداد درخواست"
+  - invalid key / 401 → "🔑 EMERGENT_LLM_KEY نامعتبره"
+  - timeout → "⌛ Gemini پاسخ نداد"
+  - otherwise → first 180 chars of the raw error
+- ✅ `.img` and `.imgedit` now show the real reason; safety-filter is the most common cause for prompts with detailed real-person descriptions or trademarked brand names
+- ✅ Tests: **81 passing** (+9 new for error mapping & generator error surfacing)
 
 ### v1.9.4 — Image Aspect-Ratio Control (Completed Jun 2026)
 - ✅ New config key `image_aspect_ratio` (default `1:1`) + `.imgsize` command to view/set it

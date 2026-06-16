@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.9.4"
+VERSION = "1.9.5"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -811,11 +811,46 @@ def _extract_ar_flag(text: str) -> tuple[str | None, str]:
     return None, text
 
 
+def _friendly_image_error(err: str) -> tuple[str, str]:
+    """Map a raw Gemini/litellm error to a (friendly_en, friendly_fa) message."""
+    e = (err or "").lower()
+    if "budget has been exceeded" in e or "budget" in e and "exceeded" in e:
+        return (
+            "💸 Emergent key budget exceeded. Go to Emergent → Profile → Universal Key to top up.",
+            "💸 اعتبار کلید Emergent تموم شده. از Profile → Universal Key شارژ کن.",
+        )
+    if "safety" in e or "blocked" in e or "content policy" in e or "no images returned" in e or "prohibited" in e:
+        return (
+            "🛡 Prompt blocked by Gemini's safety filter.\n"
+            "Try: remove brand names, avoid detailed real-person descriptions (age/skin/face), "
+            "use generic styling words instead.",
+            "🛡 پرامپت توسط فیلتر امنیتی Gemini مسدود شد.\n"
+            "پیشنهاد: نام برند (مرسدس، نایک، …) رو حذف کن، توصیف دقیق چهره/سن/پوست شخص واقعی نده، "
+            "از کلمات کلی‌تر و سبک هنری استفاده کن.",
+        )
+    if "rate" in e and "limit" in e:
+        return ("⏳ Rate limit — wait a few seconds and try again.",
+                "⏳ محدودیت تعداد درخواست — چند ثانیه صبر کن دوباره امتحان کن.")
+    if "invalid_api_key" in e or "authentication" in e or "unauthorized" in e or "401" in e:
+        return ("🔑 Invalid EMERGENT_LLM_KEY. Check your .env file.",
+                "🔑 EMERGENT_LLM_KEY نامعتبره. فایل .env رو چک کن.")
+    if "timeout" in e or "timed out" in e:
+        return ("⌛ Gemini timed out. Try again in a moment.",
+                "⌛ Gemini پاسخ نداد. چند لحظه صبر کن.")
+    # Generic fallback — show the first useful piece of the error
+    snippet = err.split("\n")[0][:180]
+    return (f"❌ Image generation failed: `{snippet}`",
+            f"❌ تولید تصویر ناموفق بود: `{snippet}`")
+
+
 # ────────── LLM helpers ──────────
-async def _generate_image(prompt: str, aspect_ratio: str | None = None) -> bytes | None:
-    ready, _ = _ai_ready()
-    if not ready or not prompt.strip():
-        return None
+async def _generate_image(prompt: str, aspect_ratio: str | None = None) -> tuple[bytes | None, str | None]:
+    """Generate an image. Returns (image_bytes, error_msg) — exactly one is None."""
+    ready, ai_err = _ai_ready()
+    if not ready:
+        return None, ai_err or "AI not configured"
+    if not prompt.strip():
+        return None, "empty prompt"
     model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
     ar = aspect_ratio or config.get("image_aspect_ratio", "1:1")
     try:
@@ -831,18 +866,21 @@ async def _generate_image(prompt: str, aspect_ratio: str | None = None) -> bytes
         )
         _text, images = await chat.send_message_multimodal_response(UserMessage(text=prompt))
         if not images:
-            log.warning("Image gen: no images returned")
-            return None
-        return base64.b64decode(images[0]["data"])
+            log.warning("Image gen: no images returned (likely safety filter)")
+            return None, "no images returned (likely content blocked by safety filter)"
+        return base64.b64decode(images[0]["data"]), None
     except Exception as e:  # noqa: BLE001
         log.error(f"Image gen error: {e}")
-        return None
+        return None, str(e)
 
 
-async def _edit_image(image_bytes: bytes, edit_prompt: str, aspect_ratio: str | None = None) -> bytes | None:
-    ready, _ = _ai_ready()
-    if not ready or not edit_prompt.strip() or not image_bytes:
-        return None
+async def _edit_image(image_bytes: bytes, edit_prompt: str, aspect_ratio: str | None = None) -> tuple[bytes | None, str | None]:
+    """Edit an image. Returns (image_bytes, error_msg)."""
+    ready, ai_err = _ai_ready()
+    if not ready:
+        return None, ai_err or "AI not configured"
+    if not edit_prompt.strip() or not image_bytes:
+        return None, "empty prompt or image"
     model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
     ar = aspect_ratio or config.get("image_aspect_ratio", "1:1")
     try:
@@ -860,12 +898,12 @@ async def _edit_image(image_bytes: bytes, edit_prompt: str, aspect_ratio: str | 
         msg = UserMessage(text=edit_prompt, file_contents=[ImageContent(image_b64)])
         _text, images = await chat.send_message_multimodal_response(msg)
         if not images:
-            log.warning("Image edit: no images returned")
-            return None
-        return base64.b64decode(images[0]["data"])
+            log.warning("Image edit: no images returned (likely safety filter)")
+            return None, "no images returned (likely content blocked by safety filter)"
+        return base64.b64decode(images[0]["data"]), None
     except Exception as e:  # noqa: BLE001
         log.error(f"Image edit error: {e}")
-        return None
+        return None, str(e)
 
 
 async def _ocr_image(image_bytes: bytes) -> str | None:
@@ -2135,9 +2173,10 @@ async def cmd_image(event):
         return
     effective_ar = ar_override or config.get("image_aspect_ratio", "1:1")
     msg = await event.edit(t("img_processing", p=prompt[:100], ar=effective_ar))
-    img_bytes = await _generate_image(prompt, aspect_ratio=ar_override)
+    img_bytes, err = await _generate_image(prompt, aspect_ratio=ar_override)
     if not img_bytes:
-        await msg.edit(t("img_failed"))
+        en, fa = _friendly_image_error(err or "")
+        await msg.edit(fa if config.get("bot_lang", "en") == "fa" else en)
         return
     tmp = None
     try:
@@ -2224,9 +2263,10 @@ async def cmd_imgedit(event):
     if not img_bytes or not isinstance(img_bytes, bytes):
         await msg.edit(t("imgedit_invalid"))
         return
-    edited_bytes = await _edit_image(img_bytes, prompt, aspect_ratio=ar_override)
+    edited_bytes, err = await _edit_image(img_bytes, prompt, aspect_ratio=ar_override)
     if not edited_bytes:
-        await msg.edit(t("imgedit_failed"))
+        en, fa = _friendly_image_error(err or "")
+        await msg.edit(fa if config.get("bot_lang", "en") == "fa" else en)
         return
     tmp = None
     try:

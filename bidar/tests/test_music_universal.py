@@ -669,8 +669,9 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
              patch.object(bidar, "LlmChat", return_value=FakeChat()):
-            out = await bidar._generate_image("a cat")
+            out, err = await bidar._generate_image("a cat")
         self.assertIsNotNone(out)
+        self.assertIsNone(err)
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "16:9"})
 
     async def test_explicit_override_wins(self):
@@ -689,8 +690,82 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
              patch.object(bidar, "LlmChat", return_value=FakeChat()):
-            await bidar._generate_image("a dog", aspect_ratio="9:16")
+            out, err = await bidar._generate_image("a dog", aspect_ratio="9:16")
+        self.assertIsNotNone(out)
+        self.assertIsNone(err)
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
+
+
+class TestImageErrorMapping(unittest.TestCase):
+    def test_budget_error(self):
+        en, fa = bidar._friendly_image_error("Budget has been exceeded! Current cost: 8.15")
+        self.assertIn("budget", en.lower())
+        self.assertIn("اعتبار", fa)
+
+    def test_safety_block(self):
+        en, fa = bidar._friendly_image_error("PROHIBITED_CONTENT")
+        self.assertIn("safety", en.lower())
+        self.assertIn("فیلتر", fa)
+
+    def test_no_images_returned_is_safety(self):
+        en, fa = bidar._friendly_image_error("no images returned (likely content blocked by safety filter)")
+        self.assertIn("safety", en.lower())
+        self.assertIn("فیلتر", fa)
+
+    def test_rate_limit(self):
+        en, fa = bidar._friendly_image_error("Rate limit reached, please retry")
+        self.assertIn("rate", en.lower())
+        self.assertIn("محدودیت", fa)
+
+    def test_invalid_key(self):
+        en, fa = bidar._friendly_image_error("invalid_api_key: 401 Unauthorized")
+        self.assertIn("EMERGENT_LLM_KEY", en)
+        self.assertIn("EMERGENT_LLM_KEY", fa)
+
+    def test_timeout(self):
+        en, fa = bidar._friendly_image_error("Request timed out after 60s")
+        self.assertIn("timed out", en.lower())
+        self.assertIn("Gemini", fa)
+
+    def test_generic_fallback(self):
+        en, fa = bidar._friendly_image_error("some weird error message we don't know")
+        self.assertIn("some weird error", en)
+        self.assertIn("some weird error", fa)
+
+
+class TestImageGenReturnsError(unittest.IsolatedAsyncioTestCase):
+    async def test_safety_filter_returns_error(self):
+        """When Gemini returns no images, generator must surface a safety error."""
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["ai_enabled"] = True
+
+        class EmptyChat:
+            def with_model(self, *a, **kw): return self
+            def with_params(self, **kw): return self
+            async def send_message_multimodal_response(self, *a, **kw):
+                return ("", [])  # no images!
+
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=EmptyChat()):
+            out, err = await bidar._generate_image("a portrait of someone famous")
+        self.assertIsNone(out)
+        self.assertIn("safety", (err or "").lower())
+
+    async def test_exception_returns_error(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["ai_enabled"] = True
+
+        class FailingChat:
+            def with_model(self, *a, **kw): return self
+            def with_params(self, **kw): return self
+            async def send_message_multimodal_response(self, *a, **kw):
+                raise RuntimeError("Budget has been exceeded!")
+
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=FailingChat()):
+            out, err = await bidar._generate_image("any prompt")
+        self.assertIsNone(out)
+        self.assertIn("budget", (err or "").lower())
 
 
 if __name__ == "__main__":
