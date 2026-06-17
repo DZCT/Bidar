@@ -136,7 +136,7 @@ New command: AI-powered TL;DR for any URL — news articles, blog posts, GitHub 
   - `.tldr <url>` — direct
   - reply + `.tldr` — auto-detect URLs in replied message
 - ✅ Up to **3 URLs** per call, summarised in parallel via `asyncio.gather`. Separator between chunks. >3900 chars splits into multiple replies (Telegram limit).
-- ✅ Summary language follows `bot_lang` (Persian / English).
+- ✅ Summary language is always **Persian (Farsi)** regardless of `bot_lang` (user preference).
 - ✅ Friendly per-URL errors (timeout, paywall, non-HTML content type) instead of generic fail.
 - ✅ Live verified: Wikipedia Python article (6KB body extracted), GitHub `torvalds/linux` (236k stars + README), URL extraction with balanced parens.
 - ✅ Tests: **92 passing** (+11 new: URL extract incl. paren-balance, classify, strip_html, summarise wiring, GitHub flow, error path).

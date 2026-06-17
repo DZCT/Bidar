@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.10.0"
+VERSION = "1.10.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -2622,7 +2622,8 @@ async def cmd_tldr(event):
             await event.edit(t("tldr_no_url"))
         return
 
-    lang = config.get("bot_lang", "en")
+    # User explicitly requested .tldr always summarise in Persian, regardless of bot_lang.
+    lang = "fa"
     if len(urls) == 1:
         status = await event.edit(t("tldr_processing_one", u=urls[0][:120]))
     else:
