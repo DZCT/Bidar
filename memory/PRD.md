@@ -1,4 +1,4 @@
-# PRD — Bidar v1.9.5 (Always Online Telegram Userbot + AI Assistant)
+# PRD — Bidar v1.10.0 (Always Online Telegram Userbot + AI Assistant)
 
 ## Problem Statement
 یوزربات تلگرام همیشه آنلاین با قابلیت پاسخ خودکار هوشمند (GPT/Claude/Gemini از طریق Emergent Universal Key) که در چت خصوصی و گروه‌ها هم بتونه با context کار کنه + ابزارهای جانبی AI (ترجمه، تولید/ویرایش تصویر، OCR، جستجوی جهانی، رابط دوزبانه).
@@ -125,7 +125,27 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.10.0 — `.tldr` Link Summariser (Completed Jun 2026)
+New command: AI-powered TL;DR for any URL — news articles, blog posts, GitHub repos, YouTube, generic web pages.
+- ✅ `_extract_urls()` — regex extraction, dedup, balanced-parentheses aware (Wikipedia URLs like `Python_(programming_language)` survive intact)
+- ✅ `_classify_url()` — github / youtube / generic routing
+- ✅ `_fetch_page_text()` — fetches HTML, extracts `<title>`, `og:description`, `<article>`/`<main>` body, falls back to `<p>/<h1-3>/<li>` collection then full-body strip. Strips `<script>`/`<style>` first. Hard cap 800KB read, 6KB body sent to AI.
+- ✅ `_fetch_github_repo()` — public GitHub API (no auth) for metadata + base64-decoded README.
+- ✅ `_ai_summarise()` — one-shot summarisation reusing the configured chat model & Emergent key.
+- ✅ Command modes:
+  - `.tldr <url>` — direct
+  - reply + `.tldr` — auto-detect URLs in replied message
+- ✅ Up to **3 URLs** per call, summarised in parallel via `asyncio.gather`. Separator between chunks. >3900 chars splits into multiple replies (Telegram limit).
+- ✅ Summary language follows `bot_lang` (Persian / English).
+- ✅ Friendly per-URL errors (timeout, paywall, non-HTML content type) instead of generic fail.
+- ✅ Live verified: Wikipedia Python article (6KB body extracted), GitHub `torvalds/linux` (236k stars + README), URL extraction with balanced parens.
+- ✅ Tests: **92 passing** (+11 new: URL extract incl. paren-balance, classify, strip_html, summarise wiring, GitHub flow, error path).
+- ✅ Help menu updated (English & Persian) with `📰 Web` section.
+
 ### v1.9.5 — Real Image Errors Surfaced (Completed Jun 2026)
+- ✅ `_generate_image` / `_edit_image` now return `(bytes, err)` tuples
+- ✅ `_friendly_image_error()` maps Gemini errors → bilingual actionable messages (budget exceeded, safety filter, rate limit, invalid key, timeout)
+- ✅ `.img` and `.imgedit` show the real reason; safety filter is the most common cause for detailed real-person + brand-name prompts
 User reported: `.img` with a long detailed prompt (real-person + Mercedes brand) returned only generic "Image generation failed. Check: AI is on, EMERGENT_LLM_KEY is set, prompt is appropriate." — impossible to know whether it was budget, safety filter, rate limit, or invalid key.
 - ✅ `_generate_image` / `_edit_image` now return `(bytes | None, error_msg | None)` instead of swallowing exceptions
 - ✅ New `_friendly_image_error()` maps raw Gemini/litellm errors to actionable bilingual messages:

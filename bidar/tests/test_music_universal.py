@@ -696,7 +696,98 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
 
 
-class TestImageErrorMapping(unittest.TestCase):
+class TestTldrHelpers(unittest.TestCase):
+    def test_extract_urls_basic(self):
+        urls = bidar._extract_urls("check https://example.com and https://github.com/x/y now")
+        self.assertEqual(urls, ["https://example.com", "https://github.com/x/y"])
+
+    def test_extract_urls_keeps_balanced_parentheses(self):
+        """Wikipedia-style URLs with balanced (parens) must survive intact."""
+        text = "see https://en.wikipedia.org/wiki/Python_(programming_language) now"
+        self.assertEqual(bidar._extract_urls(text),
+                         ["https://en.wikipedia.org/wiki/Python_(programming_language)"])
+        # Trailing `)` without matching `(` IS punctuation
+        text2 = "see (https://example.com/foo) end"
+        self.assertEqual(bidar._extract_urls(text2), ["https://example.com/foo"])
+
+    def test_extract_urls_dedup_and_limit(self):
+        text = " ".join([f"https://x.com/{i}" for i in range(10)])
+        urls = bidar._extract_urls(text, max_urls=3)
+        self.assertEqual(len(urls), 3)
+
+    def test_extract_urls_empty(self):
+        self.assertEqual(bidar._extract_urls(""), [])
+        self.assertEqual(bidar._extract_urls(None), [])
+        self.assertEqual(bidar._extract_urls("no links here"), [])
+
+    def test_classify_github(self):
+        self.assertEqual(bidar._classify_url("https://github.com/torvalds/linux"), "github")
+        self.assertEqual(bidar._classify_url("https://www.github.com/foo/bar"), "github")
+
+    def test_classify_youtube(self):
+        self.assertEqual(bidar._classify_url("https://www.youtube.com/watch?v=abc"), "youtube")
+        self.assertEqual(bidar._classify_url("https://youtu.be/abc"), "youtube")
+
+    def test_classify_generic(self):
+        self.assertEqual(bidar._classify_url("https://example.com"), "generic")
+        self.assertEqual(bidar._classify_url("https://news.ycombinator.com/item?id=1"), "generic")
+
+    def test_strip_html(self):
+        s = "<p>Hello <b>world</b> &amp; co.</p><script>alert(1)</script><style>x{}</style>"
+        out = bidar._strip_html(s)
+        self.assertNotIn("<", out)
+        self.assertNotIn("alert", out)
+        self.assertNotIn("x{}", out)
+        self.assertIn("Hello world & co.", out)
+
+
+class TestTldrFlow(unittest.IsolatedAsyncioTestCase):
+    async def test_summarise_generic_uses_fetched_payload(self):
+        captured = {}
+
+        def fake_fetch(url, max_chars=6000):
+            return {"url": url, "title": "Test Page", "description": "desc",
+                    "body": "body text " * 50}
+
+        async def fake_ai(prompt):
+            captured["prompt"] = prompt
+            return "**Headline**\n• point 1\n• point 2"
+
+        with patch.object(bidar, "_fetch_page_text", side_effect=fake_fetch), \
+             patch.object(bidar, "_ai_summarise", side_effect=fake_ai):
+            out = await bidar._tldr_one("https://example.com/article", "fa")
+        self.assertIn("Headline", out)
+        self.assertIn("Persian", captured["prompt"])
+        self.assertIn("example.com/article", captured["prompt"])
+
+    async def test_github_uses_repo_api(self):
+        info = {"full_name": "octocat/Hello-World",
+                "description": "test repo", "language": "Python",
+                "stars": 1234, "forks": 5, "open_issues": 7,
+                "homepage": "", "topics": ["demo"], "license": "MIT",
+                "readme": "# Hello"}
+
+        async def fake_ai(prompt):
+            return "**Project** does X."
+
+        with patch.object(bidar, "_fetch_github_repo", return_value=info), \
+             patch.object(bidar, "_ai_summarise", side_effect=fake_ai):
+            out = await bidar._tldr_one("https://github.com/octocat/Hello-World", "en")
+        self.assertIn("octocat/Hello-World", out)
+        self.assertIn("1,234", out)  # star count formatted
+        self.assertIn("Project", out)
+
+    async def test_fetch_failure_returns_error(self):
+        def boom(url, max_chars=6000):
+            raise TimeoutError("connection timed out")
+
+        with patch.object(bidar, "_fetch_page_text", side_effect=boom):
+            out = await bidar._tldr_one("https://broken.example.com/x", "en")
+        self.assertIn("❌", out)
+        self.assertIn("timed out", out)
+
+
+
     def test_budget_error(self):
         en, fa = bidar._friendly_image_error("Budget has been exceeded! Current cost: 8.15")
         self.assertIn("budget", en.lower())

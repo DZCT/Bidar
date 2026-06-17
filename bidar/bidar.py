@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.9.5"
+VERSION = "1.10.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -344,6 +344,26 @@ I18N = {
     },
     "imgedit_caption": {"en": "🖼 **Edited:** {p}", "fa": "🖼 **ویرایش‌شده:** {p}"},
 
+    # TL;DR — link summariser
+    "tldr_usage": {
+        "en": "📰 **TL;DR — link summariser**\n\n  `{p}tldr <url>` — summarise a URL\n  reply + `{p}tldr` — auto-detect URLs in the replied message\n\nWorks with: news articles, blog posts, GitHub repos, YouTube, and generic web pages.\nUp to **3 links** per call.",
+        "fa": "📰 **TL;DR — خلاصه‌ساز لینک**\n\n  `{p}tldr <لینک>` — خلاصه‌ی یه لینک\n  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n\nپشتیبانی: خبر، مقاله، ریپوی GitHub، یوتیوب، هر صفحه‌ی وب.\nحداکثر **۳ لینک** در هر دستور.",
+    },
+    "tldr_no_url": {
+        "en": "⚠️ No URL found. Send a URL after the command or reply to a message containing a link.",
+        "fa": "⚠️ هیچ لینکی پیدا نشد. بعد از دستور لینک بفرست، یا روی پیامی که لینک داره ریپلای بزن.",
+    },
+    "tldr_processing_one": {
+        "en": "📰 Reading & summarising...\n_{u}_",
+        "fa": "📰 در حال خوندن و خلاصه‌سازی...\n_{u}_",
+    },
+    "tldr_processing_multi": {
+        "en": "📰 Reading & summarising {n} links...",
+        "fa": "📰 در حال خوندن و خلاصه‌سازی {n} لینک...",
+    },
+    "tldr_done_one": {"en": "📰 **TL;DR** of {u}", "fa": "📰 **خلاصه‌ی** {u}"},
+    "tldr_separator": {"en": "\n\n━━━━━━━━━━━━━━━━━━━━\n\n", "fa": "\n\n━━━━━━━━━━━━━━━━━━━━\n\n"},
+
     # OCR (NEW)
     "ocr_usage": {
         "en": "📖 **OCR — Extract text from image**\n\n🔧 How to use:\n1. Reply to a **message containing an image**\n2. Type: `{p}ocr`\n\nThe extracted text will replace your command.",
@@ -537,6 +557,9 @@ I18N = {
             "  `{p}ocr` — extract text from image (reply to image)\n"
             "  `{p}imgmodel <model>` — change image model\n"
             "  `{p}imgsize [ratio]` — view/set default aspect ratio\n\n"
+            "📰 **Web**\n"
+            "  `{p}tldr <url>` — summarise a link\n"
+            "  reply + `{p}tldr` — auto-detect URLs in replied message\n\n"
             "🔎 **Search**\n"
             "  `{p}search <query>` — search normal chats → saves .txt file\n"
             "  `{p}searchall <query>` — search **only** restricted/blocked channels\n\n"
@@ -590,6 +613,9 @@ I18N = {
             "  `{p}ocr` — استخراج متن از عکس (روی عکس reply بزن)\n"
             "  `{p}imgmodel <model>` — تغییر مدل تصویر\n"
             "  `{p}imgsize [ابعاد]` — نمایش/تنظیم ابعاد پیش‌فرض\n\n"
+            "📰 **وب**\n"
+            "  `{p}tldr <لینک>` — خلاصه‌سازی لینک\n"
+            "  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n\n"
             "🔎 **جستجو**\n"
             "  `{p}search <متن>` — جستجو در چت‌های عادی → فایل .txt میده\n"
             "  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های محدود/مسدود\n\n"
@@ -723,6 +749,243 @@ async def _ai_respond(session_id: str, user_text: str) -> str | None:
 
 
 # ────── Translate / Image generate / Image edit / OCR helpers ──────
+# ────────── TL;DR — Web Page / Article / Repo Summariser ──────────
+_URL_RE = re.compile(r"https?://[^\s<>'\"`{}|^]+", re.IGNORECASE)
+
+
+def _extract_urls(text: str, max_urls: int = 3) -> list[str]:
+    """Extract up to `max_urls` distinct URLs from `text`, trailing punct stripped."""
+    if not text:
+        return []
+    seen: list[str] = []
+    for raw in _URL_RE.findall(text):
+        # Strip plain trailing punctuation
+        url = raw.rstrip(".,;:!?>'\"")
+        # Balance ( and ) — keep trailing ')' only if there's a matching '('.
+        # Handles Wikipedia URLs like /Python_(programming_language).
+        while url.endswith(")") and url.count("(") < url.count(")"):
+            url = url[:-1]
+        # Strip any remaining standalone trailing brackets that aren't part of a path
+        url = url.rstrip("]}")
+        if url and url not in seen:
+            seen.append(url)
+            if len(seen) >= max_urls:
+                break
+    return seen
+
+
+def _classify_url(url: str) -> str:
+    u = url.lower()
+    if re.search(r"//(?:www\.)?github\.com/[^/]+/[^/?#]+", u):
+        return "github"
+    if "youtube.com/watch" in u or "youtu.be/" in u or "music.youtube.com/watch" in u:
+        return "youtube"
+    return "generic"
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_SCRIPT_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1>",
+                              re.DOTALL | re.IGNORECASE)
+
+
+def _strip_html(s: str) -> str:
+    """Quick-and-dirty HTML → plain text. Good enough for summarisation."""
+    if not s:
+        return ""
+    s = _HTML_SCRIPT_RE.sub(" ", s)
+    s = _HTML_TAG_RE.sub(" ", s)
+    s = html.unescape(s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _fetch_page_text(url: str, max_chars: int = 6000) -> dict:
+    """Download a URL and return {title, description, body, url}.
+    Blocking — must be called via `asyncio.to_thread`.
+    Raises on network failure.
+    """
+    req = urllib.request.Request(url, headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9,fa;q=0.8",
+    })
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        ctype = resp.headers.get("Content-Type", "").lower()
+        final_url = resp.url or url
+        if "html" not in ctype and "text/plain" not in ctype:
+            raise ValueError(f"unsupported content type: {ctype or '?'}")
+        raw = resp.read(800_000).decode("utf-8", errors="ignore")
+
+    # Title + OpenGraph description
+    title_m = re.search(r"<title[^>]*>([^<]+)</title>", raw, re.I)
+    title = html.unescape(title_m.group(1).strip()) if title_m else ""
+
+    desc_m = re.search(
+        r'<meta[^>]+(?:property|name)=["\'](?:og:description|description)["\']'
+        r'[^>]+content=["\']([^"\']+)["\']', raw, re.IGNORECASE)
+    desc = html.unescape(desc_m.group(1).strip()) if desc_m else ""
+
+    # Main content: try <article> / <main>, else collect <p> tags, else strip body
+    body = ""
+    for tag in ("article", "main"):
+        m = re.search(rf"<{tag}\b[^>]*>(.*?)</{tag}>", raw, re.DOTALL | re.I)
+        if m:
+            candidate = _strip_html(m.group(1))
+            if len(candidate) > 200:
+                body = candidate
+                break
+
+    if not body:
+        paras = re.findall(r"<(?:p|h[1-3]|li)\b[^>]*>(.*?)</(?:p|h[1-3]|li)>",
+                            raw, re.DOTALL | re.I)
+        if paras:
+            body = " ".join(_strip_html(p) for p in paras[:40])
+        else:
+            body = _strip_html(raw)
+
+    body = re.sub(r"\s+", " ", body).strip()
+    return {
+        "url": final_url,
+        "title": title[:300],
+        "description": desc[:500],
+        "body": body[:max_chars],
+    }
+
+
+def _fetch_github_repo(url: str) -> dict | None:
+    """Fetch GitHub repo metadata + README via the public API (no auth needed)."""
+    m = re.search(r"//(?:www\.)?github\.com/([^/]+)/([^/?#]+)", url, re.I)
+    if not m:
+        return None
+    owner, repo = m.group(1), m.group(2).rstrip(".git")
+    try:
+        meta = _http_json(f"https://api.github.com/repos/{owner}/{repo}", timeout=20)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"[tldr] github API failed: {e}")
+        return None
+    readme_text = ""
+    try:
+        # README is base64-encoded in the response
+        rd = _http_json(f"https://api.github.com/repos/{owner}/{repo}/readme", timeout=20)
+        if rd.get("content"):
+            readme_text = base64.b64decode(rd["content"]).decode("utf-8", errors="ignore")
+            readme_text = _strip_html(readme_text)[:5000]
+    except Exception as e:  # noqa: BLE001
+        log.debug(f"[tldr] github readme fetch: {e}")
+    return {
+        "full_name": meta.get("full_name"),
+        "description": meta.get("description") or "",
+        "language": meta.get("language") or "",
+        "stars": meta.get("stargazers_count") or 0,
+        "forks": meta.get("forks_count") or 0,
+        "open_issues": meta.get("open_issues_count") or 0,
+        "homepage": meta.get("homepage") or "",
+        "topics": meta.get("topics") or [],
+        "license": (meta.get("license") or {}).get("spdx_id") or "",
+        "readme": readme_text,
+    }
+
+
+async def _ai_summarise(prompt: str) -> str | None:
+    """One-shot summarisation call. Reuses configured chat model & key."""
+    ready, _ = _ai_ready()
+    if not ready or not prompt.strip():
+        return None
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"tldr-{time.time_ns()}",
+            system_message=(
+                "You are an expert summariser. You write tight, factual, well-structured "
+                "summaries with no preamble, no apologies, no meta-commentary. "
+                "Use Markdown formatting and bullet points where helpful."
+            ),
+        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
+        resp = await chat.send_message(UserMessage(text=prompt))
+        return str(resp).strip()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[tldr] AI summarise error: {e}")
+        return None
+
+
+def _tldr_prompt(content: dict, lang: str) -> str:
+    """Build the summarisation prompt for a fetched URL payload."""
+    lang_name = "Persian (Farsi)" if lang == "fa" else "English"
+    return (
+        f"Summarise the following web page in {lang_name}.\n"
+        f"Format:\n"
+        f"• Start with **one short headline** line (no labels).\n"
+        f"• Then 4-6 bullet points covering the main topic, key facts/findings, "
+        f"and why it matters.\n"
+        f"• Bold key terms with **double asterisks**.\n"
+        f"• No preamble, no 'Here is the summary', no closing remarks.\n"
+        f"• If the page is mostly an error / paywall / login wall, say so and stop.\n\n"
+        f"URL: {content['url']}\n"
+        f"TITLE: {content.get('title','')}\n"
+        f"DESCRIPTION: {content.get('description','')}\n\n"
+        f"BODY:\n{content.get('body','')[:6000]}"
+    )
+
+
+def _tldr_github_prompt(info: dict, url: str, lang: str) -> str:
+    lang_name = "Persian (Farsi)" if lang == "fa" else "English"
+    return (
+        f"Summarise this GitHub repository in {lang_name}.\n"
+        f"Format:\n"
+        f"• First line: one-sentence project pitch.\n"
+        f"• Then 3-5 bullets: what it does, who it's for, notable features, how to run it.\n"
+        f"• Bold key terms.\n"
+        f"• No preamble or sign-off.\n\n"
+        f"REPO: {info['full_name']}  ({url})\n"
+        f"DESCRIPTION: {info['description']}\n"
+        f"LANGUAGE: {info['language']} · STARS: {info['stars']:,} · "
+        f"FORKS: {info['forks']:,} · ISSUES: {info['open_issues']:,}\n"
+        f"TOPICS: {', '.join(info['topics']) or '—'}\n"
+        f"LICENSE: {info['license'] or '—'}\n\n"
+        f"README (first 5k chars):\n{info['readme']}"
+    )
+
+
+async def _tldr_one(url: str, lang: str) -> str:
+    """Fetch + summarise one URL. Returns the formatted reply chunk."""
+    kind = _classify_url(url)
+    short_url = url if len(url) <= 90 else url[:87] + "…"
+
+    if kind == "github":
+        info = await asyncio.to_thread(_fetch_github_repo, url)
+        if not info:
+            return f"❌ GitHub: `{short_url}` — couldn't fetch repo info"
+        ai = await _ai_summarise(_tldr_github_prompt(info, url, lang))
+        header = (
+            f"📦 [{info['full_name']}]({url})\n"
+            f"⭐ {info['stars']:,} · 🍴 {info['forks']:,} · "
+            f"🐛 {info['open_issues']:,} · {info['language'] or '—'}"
+        )
+        return header + ("\n\n" + ai if ai else f"\n\n_{info['description']}_")
+
+    if kind == "youtube":
+        # Extract video ID and title via existing oEmbed helper
+        title_q = await asyncio.to_thread(_youtube_title_query, url) or "YouTube video"
+        body = f"YouTube video. Title and artist: {title_q}."
+        ai = await _ai_summarise(_tldr_prompt(
+            {"url": url, "title": title_q, "description": "", "body": body}, lang))
+        return f"▶️ [{title_q}]({url})\n\n" + (ai or "_(no AI summary available)_")
+
+    # Generic web page
+    try:
+        page = await asyncio.to_thread(_fetch_page_text, url)
+    except Exception as e:  # noqa: BLE001
+        return f"❌ `{short_url}`\n`{str(e)[:200]}`"
+    if not page.get("body") and not page.get("description"):
+        return f"❌ `{short_url}` — no readable text on this page"
+    ai = await _ai_summarise(_tldr_prompt(page, lang))
+    head = f"🌐 [{page['title'] or short_url}]({url})"
+    return head + ("\n\n" + ai if ai else f"\n\n_{page.get('description','')[:400]}_")
+
+
 async def _translate_text(text: str, target_lang: str) -> str | None:
     ready, _ = _ai_ready()
     if not ready or not text.strip():
@@ -2330,6 +2593,79 @@ async def cmd_ocr(event):
     else:
         await msg.edit(extracted)
     log.info(f"[.ocr] extracted {len(extracted)} chars from image")
+
+
+# ═════════ TL;DR — Link summariser ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}tldr(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_tldr(event):
+    """Summarise URL(s) — either from the command argument or from a replied message."""
+    arg = (event.pattern_match.group(1) or "").strip()
+    sources_text = arg
+    replied = None
+    # If no inline URL, fall back to replied message
+    if not _extract_urls(sources_text):
+        if event.is_reply:
+            try:
+                replied = await event.get_reply_message()
+            except Exception:  # noqa: BLE001
+                replied = None
+            if replied and (replied.raw_text or ""):
+                sources_text = replied.raw_text
+
+    urls = _extract_urls(sources_text)
+    if not urls:
+        # Show usage when called with nothing at all; otherwise an explicit message
+        if not arg and not event.is_reply:
+            await event.edit(t("tldr_usage", p=CMD_PREFIX))
+        else:
+            await event.edit(t("tldr_no_url"))
+        return
+
+    lang = config.get("bot_lang", "en")
+    if len(urls) == 1:
+        status = await event.edit(t("tldr_processing_one", u=urls[0][:120]))
+    else:
+        status = await event.edit(t("tldr_processing_multi", n=len(urls)))
+
+    parts = await asyncio.gather(*[_tldr_one(u, lang) for u in urls],
+                                 return_exceptions=True)
+    chunks: list[str] = []
+    for u, p in zip(urls, parts):
+        if isinstance(p, Exception):
+            log.error(f"[.tldr] failed for {u}: {p}")
+            chunks.append(f"❌ `{u[:80]}` — `{str(p)[:200]}`")
+        else:
+            chunks.append(p)
+
+    full = t("tldr_separator").join(chunks)
+    reply_to = (replied.id if replied else event.reply_to_msg_id)
+    # Telegram limit is ~4096; trim with link to source if too long
+    if len(full) <= 3900:
+        try:
+            await status.edit(full, link_preview=False)
+        except Exception:  # noqa: BLE001
+            # Fallback: delete status, send fresh (handles cases where
+            # the message can't be edited because of formatting size)
+            try:
+                await status.delete()
+            except Exception:  # noqa: BLE001
+                pass
+            await client.send_message(event.chat_id, full,
+                                      link_preview=False,
+                                      reply_to=reply_to)
+    else:
+        # Edit status with first chunk, send the rest as replies to keep the thread tidy
+        first = full[:3900] + "\n\n…"
+        await status.edit(first, link_preview=False)
+        rest = full[3900:]
+        while rest:
+            piece = rest[:3900]
+            rest = rest[3900:]
+            await client.send_message(event.chat_id, piece,
+                                      link_preview=False,
+                                      reply_to=reply_to)
+    log.info(f"[.tldr] summarised {len(urls)} URL(s)")
 
 
 # ═════════ Bot UI Language ═════════
