@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.10.1"
+VERSION = "1.10.2"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -1664,7 +1664,8 @@ def _music_download_sync(target: str, tmpdir: str) -> dict | None:
 
 
 async def _music_download_and_send(event, url: str, platform: str, is_drm: bool, *,
-                                   reply_to_msg_id=None, force_reply: bool = False) -> bool:
+                                   reply_to_msg_id=None, force_reply: bool = False,
+                                   fallback_urls: list[str] | None = None) -> bool:
     """Download a track from any platform and send it as audio.
 
     For DRM platforms (Spotify/Deezer/Apple Music/Tidal), extracts metadata then
@@ -1724,6 +1725,13 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
                 targets.append(f"scsearch1:{query}")
         else:
             targets = [url]
+            # Allow callers (e.g. `.sc <number>`) to provide additional candidates
+            # to try when the primary URL is DRM-protected (SoundCloud Go+ / paid
+            # tracks raise `This video is DRM protected` and have no audio stream).
+            if fallback_urls:
+                for fb in fallback_urls:
+                    if fb and fb != url and fb not in targets:
+                        targets.append(fb)
 
         info = None
         last_err: Exception | None = None
@@ -1765,8 +1773,16 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
                     info = await _try_targets(fb_targets)
 
         if not info:
-            err = str(last_err)[:200] if last_err else "no audio found"
-            await status_msg.edit(t("music_failed", platform=label, e=err))
+            raw_err = str(last_err) if last_err else "no audio found"
+            # Friendlier hint for SoundCloud Go+ / paid DRM-protected tracks
+            if "DRM protected" in raw_err or "drm" in raw_err.lower():
+                err_short = (
+                    "all tried tracks are DRM-protected (SoundCloud Go+/paid). "
+                    "Pick another search result or try a different query."
+                )
+            else:
+                err_short = raw_err[:200]
+            await status_msg.edit(t("music_failed", platform=label, e=err_short))
             return False
 
         try:
@@ -2741,7 +2757,15 @@ async def cmd_soundcloud(event):
         if not (1 <= idx <= len(results)):
             await event.edit(t("sc_invalid_pick", n=len(results)))
             return
-        await _music_download_and_send(event, results[idx - 1]["url"], "soundcloud", False)
+        # Pass remaining results as fallbacks so that DRM-protected picks
+        # (SoundCloud Go+ / paid tracks) automatically roll over to the
+        # next available result instead of dead-ending the user.
+        primary = results[idx - 1]["url"]
+        fallbacks = [r["url"] for i, r in enumerate(results, 1) if i != idx]
+        await _music_download_and_send(
+            event, primary, "soundcloud", False,
+            fallback_urls=fallbacks,
+        )
         return
 
     # Case 2: any supported music platform URL

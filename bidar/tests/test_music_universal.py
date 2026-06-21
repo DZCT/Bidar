@@ -14,7 +14,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 # Stub env vars BEFORE importing bidar (which reads them at import time)
 os.environ.setdefault("API_ID", "12345")
@@ -696,7 +696,100 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
 
 
-class TestTldrHelpers(unittest.TestCase):
+class TestSoundCloudDRMFallback(unittest.IsolatedAsyncioTestCase):
+    """Picking a SoundCloud search result that's DRM-protected must auto-roll
+    over to the next non-DRM result instead of dead-ending the user."""
+
+    async def test_picking_drm_track_rolls_to_next(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.YTDLP_OK = True
+        attempts: list[str] = []
+
+        def fake_dl(target, tmpdir):
+            attempts.append(target)
+            if "drm-track" in target:
+                # yt-dlp raises this for SoundCloud Go+ paid tracks
+                raise RuntimeError(
+                    "ERROR: [soundcloud] 123: This video is DRM protected"
+                )
+            # Simulate a successful download of the next candidate
+            path = os.path.join(tmpdir, "song.mp3")
+            with open(path, "wb") as f:
+                f.write(b"FAKE_MP3")
+            # `_music_download_sync` calls `os.listdir(tmpdir)` after yt-dlp;
+            # we need to also satisfy its info-dict shape. Mock everything via patch.
+            return {"filepath": path, "title": "Vigen - Chera",
+                    "uploader": "Behtarin", "duration": 290, "thumb": None}
+
+        # Build an event with a status message we can capture
+        ev = MagicMock()
+        ev.out = True
+        ev.chat_id = 1
+        ev.reply_to_msg_id = None
+        ev.message = MagicMock(); ev.message.id = 5
+        status = MagicMock()
+        status.edit = AsyncMock(); status.delete = AsyncMock()
+        ev.edit = AsyncMock(return_value=status)
+
+        sent_file = {}
+
+        async def fake_send_file(chat_id, path, **kw):
+            sent_file["path"] = path
+            sent_file["caption"] = kw.get("caption", "")
+
+        with patch.object(bidar, "_music_download_sync", side_effect=fake_dl), \
+             patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            ok = await bidar._music_download_and_send(
+                ev,
+                "https://soundcloud.com/drm-track/123",
+                "soundcloud",
+                False,
+                fallback_urls=[
+                    "https://soundcloud.com/good-track/2",
+                    "https://soundcloud.com/good-track/3",
+                ],
+            )
+        self.assertTrue(ok)
+        # First attempt = the DRM URL, second attempt = first fallback
+        self.assertEqual(len(attempts), 2)
+        self.assertIn("drm-track", attempts[0])
+        self.assertIn("good-track/2", attempts[1])
+        self.assertEqual(sent_file["path"].endswith("song.mp3"), True)
+
+    async def test_all_drm_returns_friendly_message(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.YTDLP_OK = True
+
+        def all_drm(target, tmpdir):
+            raise RuntimeError(
+                "ERROR: [soundcloud] X: This video is DRM protected"
+            )
+
+        ev = MagicMock()
+        ev.out = True; ev.chat_id = 1; ev.reply_to_msg_id = None
+        ev.message = MagicMock(); ev.message.id = 7
+        status = MagicMock(); status.edit = AsyncMock(); status.delete = AsyncMock()
+        last_edit = {}
+
+        async def capture_edit(text, *a, **kw):
+            last_edit["text"] = text
+        status.edit = AsyncMock(side_effect=capture_edit)
+        ev.edit = AsyncMock(return_value=status)
+
+        with patch.object(bidar, "_music_download_sync", side_effect=all_drm), \
+             patch.object(bidar, "client"):
+            ok = await bidar._music_download_and_send(
+                ev, "https://soundcloud.com/x/1", "soundcloud", False,
+                fallback_urls=["https://soundcloud.com/x/2"],
+            )
+        self.assertFalse(ok)
+        # The user should see the friendly DRM hint, not the raw yt-dlp error
+        self.assertIn("DRM", last_edit["text"])
+        self.assertIn("Pick another", last_edit["text"])
+
+
+
     def test_extract_urls_basic(self):
         urls = bidar._extract_urls("check https://example.com and https://github.com/x/y now")
         self.assertEqual(urls, ["https://example.com", "https://github.com/x/y"])
