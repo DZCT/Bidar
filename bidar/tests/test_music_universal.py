@@ -696,7 +696,202 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
 
 
+class TestStyleAgedHelpers(unittest.TestCase):
+    def test_resolve_style_english_presets(self):
+        for k in ("vangogh", "anime", "ghibli", "pixar", "cyberpunk", "lego", "noir"):
+            key, desc = bidar._resolve_style(k)
+            self.assertEqual(key, k)
+            self.assertTrue(desc and len(desc) > 10)
+
+    def test_resolve_style_case_insensitive(self):
+        key, _ = bidar._resolve_style("VANGOGH")
+        self.assertEqual(key, "vangogh")
+        key, _ = bidar._resolve_style("Pixar")
+        self.assertEqual(key, "pixar")
+
+    def test_resolve_style_persian_aliases(self):
+        self.assertEqual(bidar._resolve_style("انیمه")[0], "anime")
+        self.assertEqual(bidar._resolve_style("گیبلی")[0], "ghibli")
+        self.assertEqual(bidar._resolve_style("پیکسار")[0], "pixar")
+        self.assertEqual(bidar._resolve_style("ون‌گوگ")[0], "vangogh")
+        self.assertEqual(bidar._resolve_style("سایبرپانک")[0], "cyberpunk")
+        self.assertEqual(bidar._resolve_style("نوآر")[0], "noir")
+        self.assertEqual(bidar._resolve_style("لگو")[0], "lego")
+
+    def test_resolve_style_freeform(self):
+        """Unknown style text is passed through as a free-form description."""
+        key, desc = bidar._resolve_style("steampunk illustration with brass gears")
+        self.assertIsNone(key)
+        self.assertEqual(desc, "steampunk illustration with brass gears")
+
+    def test_resolve_style_empty(self):
+        self.assertEqual(bidar._resolve_style(""), (None, None))
+        self.assertEqual(bidar._resolve_style(None), (None, None))
+
+    def test_parse_age_delta_positive(self):
+        self.assertEqual(bidar._parse_age_delta("+20"), 20)
+        self.assertEqual(bidar._parse_age_delta("20"), 20)
+        self.assertEqual(bidar._parse_age_delta(" 20 "), 20)
+        self.assertEqual(bidar._parse_age_delta("20y"), 20)
+        self.assertEqual(bidar._parse_age_delta("20 years"), 20)
+        self.assertEqual(bidar._parse_age_delta("20 سال"), 20)
+
+    def test_parse_age_delta_negative(self):
+        self.assertEqual(bidar._parse_age_delta("-10"), -10)
+        self.assertEqual(bidar._parse_age_delta("-5y"), -5)
+
+    def test_parse_age_delta_persian_digits(self):
+        self.assertEqual(bidar._parse_age_delta("۲۰"), 20)
+        self.assertEqual(bidar._parse_age_delta("-۱۵"), -15)
+        self.assertEqual(bidar._parse_age_delta("۱۵ سال"), 15)
+
+    def test_parse_age_delta_invalid(self):
+        self.assertIsNone(bidar._parse_age_delta(""))
+        self.assertIsNone(bidar._parse_age_delta(None))
+        self.assertIsNone(bidar._parse_age_delta("abc"))
+        self.assertIsNone(bidar._parse_age_delta("0"))      # zero is meaningless
+        self.assertIsNone(bidar._parse_age_delta("100"))    # over cap
+        self.assertIsNone(bidar._parse_age_delta("+200y"))  # over cap
+
+
 class TestSoundCloudDRMFallback(unittest.IsolatedAsyncioTestCase):
+    """Picking a SoundCloud search result that's DRM-protected must auto-roll
+    over to the next non-DRM result instead of dead-ending the user."""
+
+    async def test_picking_drm_track_rolls_to_next(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.YTDLP_OK = True
+        attempts: list[str] = []
+
+        def fake_dl(target, tmpdir):
+            attempts.append(target)
+            if "drm-track" in target:
+                raise RuntimeError(
+                    "ERROR: [soundcloud] 123: This video is DRM protected"
+                )
+            path = os.path.join(tmpdir, "song.mp3")
+            with open(path, "wb") as f:
+                f.write(b"FAKE_MP3")
+            return {"filepath": path, "title": "Vigen - Chera",
+                    "uploader": "Behtarin", "duration": 290, "thumb": None}
+
+        ev = MagicMock()
+        ev.out = True
+        ev.chat_id = 1
+        ev.reply_to_msg_id = None
+        ev.message = MagicMock(); ev.message.id = 5
+        status = MagicMock()
+        status.edit = AsyncMock(); status.delete = AsyncMock()
+        ev.edit = AsyncMock(return_value=status)
+
+        sent_file = {}
+
+        async def fake_send_file(chat_id, path, **kw):
+            sent_file["path"] = path
+
+        with patch.object(bidar, "_music_download_sync", side_effect=fake_dl), \
+             patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            ok = await bidar._music_download_and_send(
+                ev,
+                "https://soundcloud.com/drm-track/123",
+                "soundcloud",
+                False,
+                fallback_urls=[
+                    "https://soundcloud.com/good-track/2",
+                    "https://soundcloud.com/good-track/3",
+                ],
+            )
+        self.assertTrue(ok)
+        self.assertEqual(len(attempts), 2)
+        self.assertIn("drm-track", attempts[0])
+        self.assertIn("good-track/2", attempts[1])
+
+    async def test_all_drm_returns_friendly_message(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.YTDLP_OK = True
+
+        def all_drm(target, tmpdir):
+            raise RuntimeError(
+                "ERROR: [soundcloud] X: This video is DRM protected"
+            )
+
+        ev = MagicMock()
+        ev.out = True; ev.chat_id = 1; ev.reply_to_msg_id = None
+        ev.message = MagicMock(); ev.message.id = 7
+        last_edit = {}
+
+        async def capture_edit(text, *a, **kw):
+            last_edit["text"] = text
+        status = MagicMock(); status.edit = AsyncMock(side_effect=capture_edit)
+        status.delete = AsyncMock()
+        ev.edit = AsyncMock(return_value=status)
+
+        with patch.object(bidar, "_music_download_sync", side_effect=all_drm), \
+             patch.object(bidar, "client"):
+            ok = await bidar._music_download_and_send(
+                ev, "https://soundcloud.com/x/1", "soundcloud", False,
+                fallback_urls=["https://soundcloud.com/x/2"],
+            )
+        self.assertFalse(ok)
+        self.assertIn("DRM", last_edit["text"])
+        self.assertIn("Pick another", last_edit["text"])
+
+
+class TestSummaryFlow(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_chat_messages_formats_and_skips(self):
+        """Empty messages get media-placeholders, own bot commands are skipped,
+        results are reversed to chronological order."""
+        # Build a fake message iterator (newest → oldest)
+        msgs = []
+
+        def mkmsg(text, sid, name, **flags):
+            m = MagicMock()
+            m.raw_text = text
+            m.sender_id = sid
+            m.photo = flags.get("photo")
+            m.video = flags.get("video")
+            m.video_note = None
+            m.voice = flags.get("voice")
+            m.sticker = flags.get("sticker")
+            m.document = None
+            sender = MagicMock()
+            sender.first_name = name; sender.last_name = None
+            sender.title = None; sender.username = None
+            async def gs():
+                return sender
+            m.get_sender = gs
+            return m
+
+        msgs = [
+            mkmsg("third message", sid=2, name="Alice"),
+            mkmsg(".sum 50", sid=99, name="Me"),  # bot command, skip
+            mkmsg("", sid=2, name="Alice", photo=True),  # photo placeholder
+            mkmsg("first message", sid=99, name="Me"),
+        ]
+
+        async def fake_iter(chat_id, limit):
+            for m in msgs:
+                yield m
+
+        me = MagicMock(); me.id = 99
+        ev = MagicMock(); ev.chat_id = 123
+
+        async def fake_get_me():
+            return me
+
+        with patch.object(bidar, "client") as mc:
+            mc.get_me = AsyncMock(side_effect=fake_get_me)
+            mc.iter_messages = fake_iter
+            lines, count = await bidar._fetch_chat_messages(ev, 10)
+
+        # Reversed: oldest → newest = first, photo placeholder, third
+        # (the .sum command is filtered out)
+        self.assertEqual(count, 3)
+        self.assertEqual(lines, ["Me: first message", "Alice: [photo]", "Alice: third message"])
+
+
+
     """Picking a SoundCloud search result that's DRM-protected must auto-roll
     over to the next non-DRM result instead of dead-ending the user."""
 

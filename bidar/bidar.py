@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.10.2"
+VERSION = "1.11.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -344,6 +344,34 @@ I18N = {
     },
     "imgedit_caption": {"en": "🖼 **Edited:** {p}", "fa": "🖼 **ویرایش‌شده:** {p}"},
 
+    # .style / .aged / .cartoon
+    "style_usage": {
+        "en": "🎨 **Style transfer** — Reply to a photo with:\n  `{p}style <style>`\n\nPresets: `vangogh`, `monet`, `anime`, `ghibli`, `pixar`, `disney`, `watercolor`, `oil`, `sketch`, `cyberpunk`, `comic`, `popart`, `lego`, `minecraft`, `pixel`, `vaporwave`, `ukiyoe`, `noir`, `claymation`\n\nPersian: `انیمه`, `گیبلی`, `پیکسار`, `ون‌گوگ`, `آبرنگ`, `رنگ‌روغن`, `سایبرپانک`, `کمیک`, `لگو`, `نوآر` ...\nOr any free-form description (e.g. `{p}style steampunk illustration with brass gears`).",
+        "fa": "🎨 **تغییر سبک هنری** — روی یه عکس ریپلای بزن:\n  `{p}style <سبک>`\n\nسبک‌های آماده: `vangogh`, `monet`, `anime`, `ghibli`, `pixar`, `disney`, `watercolor`, `oil`, `sketch`, `cyberpunk`, `comic`, `popart`, `lego`, `minecraft`, `pixel`, `vaporwave`, `ukiyoe`, `noir`, `claymation`\n\nفارسی: `انیمه`, `گیبلی`, `پیکسار`, `ون‌گوگ`, `آبرنگ`, `رنگ‌روغن`, `سایبرپانک`, `کمیک`, `لگو`, `نوآر` ...\nیا هر توصیف آزاد (مثلاً `{p}style steampunk illustration with brass gears`).",
+    },
+    "style_processing": {"en": "🎨 Restyling → {s}...", "fa": "🎨 تغییر سبک → {s}..."},
+    "style_caption":    {"en": "🎨 Style: **{s}**",    "fa": "🎨 سبک: **{s}**"},
+
+    "aged_usage": {
+        "en": "👴 **Age / De-age** — Reply to a photo of a person with:\n  `{p}aged +20` — make 20 years older\n  `{p}aged -10` — make 10 years younger\n\nRange: 1 to 80 years. Persian digits OK (`{p}aged ۱۵`).",
+        "fa": "👴 **پیر / جوون کن** — روی یه عکس ریپلای بزن:\n  `{p}aged +20` — ۲۰ سال پیرتر کن\n  `{p}aged -10` — ۱۰ سال جوون‌تر کن\n\nبازه: ۱ تا ۸۰ سال. اعداد فارسی هم قبوله (`{p}aged ۱۵`).",
+    },
+    "aged_processing": {"en": "👴 Aging photo ({y} years)...", "fa": "👴 در حال تغییر سن ({y} سال)..."},
+    "aged_caption":    {"en": "👴 Aged: **{y} years**",        "fa": "👴 تغییر سن: **{y} سال**"},
+
+    "cartoon_processing": {"en": "🧒 Cartoonifying ({s})...", "fa": "🧒 در حال کارتونی کردن ({s})..."},
+    "cartoon_caption":    {"en": "🧒 Cartoon: **{s}**",       "fa": "🧒 کارتونی: **{s}**"},
+
+    # Group / chat summariser (.sum)
+    "sum_usage": {
+        "en": "📊 **Chat summariser**\n\n  `{p}sum` — summarise last 50 messages\n  `{p}sum <N>` — summarise last N messages (max 200)\n\nWorks in private chats and groups. Output is always in Persian.",
+        "fa": "📊 **خلاصه‌ساز چت**\n\n  `{p}sum` — خلاصه‌ی ۵۰ پیام آخر\n  `{p}sum <N>` — خلاصه‌ی N پیام آخر (حداکثر ۲۰۰)\n\nهم در پی‌وی هم در گروه‌ها کار می‌کنه. خروجی همیشه فارسی.",
+    },
+    "sum_reading":   {"en": "📊 Reading last {n} messages...", "fa": "📊 در حال خوندن {n} پیام اخیر..."},
+    "sum_no_msgs":   {"en": "ℹ️ Nothing meaningful to summarise.", "fa": "ℹ️ پیامی برای خلاصه‌سازی پیدا نشد."},
+    "sum_failed":    {"en": "❌ Summarisation failed: {e}", "fa": "❌ خلاصه‌سازی ناموفق بود: {e}"},
+    "sum_header":    {"en": "📊 **Summary of last {n} messages**\n\n{s}", "fa": "📊 **خلاصه‌ی {n} پیام اخیر**\n\n{s}"},
+
     # TL;DR — link summariser
     "tldr_usage": {
         "en": "📰 **TL;DR — link summariser**\n\n  `{p}tldr <url>` — summarise a URL\n  reply + `{p}tldr` — auto-detect URLs in the replied message\n\nWorks with: news articles, blog posts, GitHub repos, YouTube, and generic web pages.\nUp to **3 links** per call.",
@@ -554,12 +582,19 @@ I18N = {
             "  `{p}img <description>` — generate image (Nano Banana)\n"
             "     supports `--ar 16:9` / `--landscape` / `--portrait` flags\n"
             "  `{p}imgedit <change>` — edit image (reply to image)\n"
+            "  `{p}style <style>` — re-render image in an artistic style (reply)\n"
+            "     presets: vangogh, anime, ghibli, pixar, cyberpunk, watercolor, lego, ...\n"
+            "     or any free-form description\n"
+            "  `{p}aged +20` / `{p}aged -10` — age or de-age person in photo (reply)\n"
+            "  `{p}cartoon [pixar|disney|anime|ghibli]` — cartoonify a photo (reply)\n"
             "  `{p}ocr` — extract text from image (reply to image)\n"
             "  `{p}imgmodel <model>` — change image model\n"
             "  `{p}imgsize [ratio]` — view/set default aspect ratio\n\n"
             "📰 **Web**\n"
-            "  `{p}tldr <url>` — summarise a link\n"
+            "  `{p}tldr <url>` — summarise a link (always in Persian)\n"
             "  reply + `{p}tldr` — auto-detect URLs in replied message\n\n"
+            "📊 **Chat**\n"
+            "  `{p}sum [N]` — summarise last N messages (default 50, max 200)\n\n"
             "🔎 **Search**\n"
             "  `{p}search <query>` — search normal chats → saves .txt file\n"
             "  `{p}searchall <query>` — search **only** restricted/blocked channels\n\n"
@@ -610,12 +645,19 @@ I18N = {
             "  `{p}img <توضیح>` — تولید تصویر با Nano Banana\n"
             "     قابل ترکیب با `--ar 16:9` / `--افقی` / `--استوری`\n"
             "  `{p}imgedit <توضیح>` — ویرایش عکس (روی عکس reply بزن)\n"
+            "  `{p}style <سبک>` — تغییر سبک هنری عکس (روی عکس reply بزن)\n"
+            "     سبک‌های آماده: انیمه، گیبلی، پیکسار، ون‌گوگ، آبرنگ، سایبرپانک، لگو، ...\n"
+            "     یا هر توصیف آزاد دلخواه\n"
+            "  `{p}aged +20` / `{p}aged -10` — پیر/جوون کردن شخص توی عکس (روی عکس reply)\n"
+            "  `{p}cartoon [pixar|disney|anime|ghibli]` — کارتونی کردن عکس (روی عکس reply)\n"
             "  `{p}ocr` — استخراج متن از عکس (روی عکس reply بزن)\n"
             "  `{p}imgmodel <model>` — تغییر مدل تصویر\n"
             "  `{p}imgsize [ابعاد]` — نمایش/تنظیم ابعاد پیش‌فرض\n\n"
             "📰 **وب**\n"
-            "  `{p}tldr <لینک>` — خلاصه‌سازی لینک\n"
+            "  `{p}tldr <لینک>` — خلاصه‌سازی لینک (همیشه فارسی)\n"
             "  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n\n"
+            "📊 **چت**\n"
+            "  `{p}sum [N]` — خلاصه‌سازی N پیام آخر (پیش‌فرض ۵۰، حداکثر ۲۰۰)\n\n"
             "🔎 **جستجو**\n"
             "  `{p}search <متن>` — جستجو در چت‌های عادی → فایل .txt میده\n"
             "  `{p}searchall <متن>` — جستجو **فقط** در کانال‌های محدود/مسدود\n\n"
@@ -2569,6 +2611,212 @@ async def cmd_imgedit(event):
                 pass
 
 
+async def _do_image_transform(event, edit_prompt: str, processing_label: str,
+                               caption_label: str) -> None:
+    """Shared flow for `.style` / `.aged` / `.cartoon`: pull replied image,
+    edit with Nano Banana, send back as reply. `edit_prompt` is the final
+    instruction sent to Gemini; the two `*_label` strings are user-facing."""
+    if not event.is_reply:
+        await event.edit(t("imgedit_need_reply"))
+        return
+    msg = await event.edit(processing_label)
+    try:
+        replied = await event.get_reply_message()
+    except Exception as e:  # noqa: BLE001
+        await msg.edit(t("imgedit_dl_error", e=str(e)))
+        return
+    if not replied or not replied.media:
+        await msg.edit(t("imgedit_no_image"))
+        return
+    try:
+        img_bytes = await client.download_media(replied, file=bytes)
+    except Exception as e:  # noqa: BLE001
+        await msg.edit(t("imgedit_dl_error", e=str(e)))
+        return
+    if not img_bytes or not isinstance(img_bytes, bytes):
+        await msg.edit(t("imgedit_invalid"))
+        return
+    edited_bytes, err = await _edit_image(img_bytes, edit_prompt)
+    if not edited_bytes:
+        en, fa = _friendly_image_error(err or "")
+        await msg.edit(fa if config.get("bot_lang", "en") == "fa" else en)
+        return
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(edited_bytes)
+            tmp = f.name
+        await client.send_file(
+            event.chat_id, tmp,
+            caption=caption_label,
+            reply_to=replied.id,
+        )
+        await msg.delete()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Send transformed image: {e}")
+        await msg.edit(t("img_send_failed", e=str(e)))
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+# ═════════ Image transformations (.style / .aged / .cartoon) ═════════
+# Curated style presets. Each maps to a precise English description that the
+# image model understands well. Persian names are aliases that resolve via
+# `STYLE_ALIAS_FA` so users can type either language.
+STYLE_PRESETS: dict[str, str] = {
+    "vangogh":    "Van Gogh post-impressionist oil painting with thick swirling brushstrokes and vibrant yellows and blues",
+    "monet":      "Claude Monet impressionist oil painting with soft pastels and visible brush strokes",
+    "picasso":    "Pablo Picasso cubist style with geometric fragmentation and bold flat colors",
+    "anime":      "high-quality Japanese anime art, vibrant colors, expressive features, cel-shaded",
+    "ghibli":     "Studio Ghibli anime art style, soft watercolor backgrounds, gentle palette, hand-painted feel",
+    "pixar":      "Pixar 3D animation style, smooth surfaces, expressive features, vibrant cinematic lighting",
+    "disney":     "classic Disney 2D animation style, expressive characters, vivid colors, hand-drawn feel",
+    "watercolor": "delicate watercolor painting with soft washes and bleeding pigments on textured paper",
+    "oil":        "classical oil painting with rich textures, dramatic chiaroscuro lighting and visible brush strokes",
+    "sketch":     "detailed graphite pencil sketch with cross-hatching and shading on white paper",
+    "cyberpunk":  "neon-lit cyberpunk style, retrowave colors, futuristic dystopian city background, rain and fog",
+    "comic":      "American comic book style with bold ink outlines, halftone shading and saturated colors",
+    "popart":     "Andy Warhol pop art style, bold flat colors, screenprint texture",
+    "lego":       "LEGO brick art, plastic block textures, studs visible",
+    "minecraft":  "Minecraft blocky voxel style, low-resolution pixelated cubes",
+    "pixel":      "16-bit pixel art style with limited palette",
+    "vaporwave":  "vaporwave aesthetic, pastel purples and pinks, retro 80s grids and statues",
+    "ukiyoe":     "traditional Japanese ukiyo-e woodblock print with flat colors and bold outlines",
+    "noir":       "1940s film noir black-and-white photography with dramatic shadows and high contrast",
+    "claymation": "claymation stop-motion style, visible fingerprints on clay, soft lighting",
+}
+
+STYLE_ALIAS_FA: dict[str, str] = {
+    "ون‌گوگ": "vangogh", "ونگوگ": "vangogh", "ون گوگ": "vangogh",
+    "مونه": "monet",
+    "پیکاسو": "picasso",
+    "انیمه": "anime", "انیمیشن": "anime",
+    "گیبلی": "ghibli", "جیبلی": "ghibli",
+    "پیکسار": "pixar",
+    "دیزنی": "disney",
+    "آبرنگ": "watercolor", "آبرنگی": "watercolor",
+    "رنگ‌روغن": "oil", "رنگ روغن": "oil",
+    "اسکچ": "sketch", "طراحی": "sketch", "مدادی": "sketch",
+    "سایبرپانک": "cyberpunk", "سایبر پانک": "cyberpunk",
+    "کمیک": "comic", "کمیکی": "comic",
+    "پاپ‌آرت": "popart", "پاپ آرت": "popart",
+    "لگو": "lego", "لگویی": "lego",
+    "ماینکرفت": "minecraft", "ماینکرافت": "minecraft",
+    "پیکسلی": "pixel", "پیکسل": "pixel",
+    "ویپرویو": "vaporwave",
+    "ژاپنی": "ukiyoe", "اوکیو": "ukiyoe",
+    "نوآر": "noir", "سیاه‌سفید": "noir", "سیاه و سفید": "noir",
+    "خمیری": "claymation", "خمیر بازی": "claymation",
+}
+
+
+def _resolve_style(s: str) -> tuple[str | None, str | None]:
+    """Return (preset_key, prompt_description). If `s` isn't a known preset,
+    treats it as a free-form style description (returns (None, s.strip()))."""
+    if not s:
+        return None, None
+    key = s.strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+    # Persian alias → english key (try the raw stripped value too)
+    persian = STYLE_ALIAS_FA.get(s.strip()) or STYLE_ALIAS_FA.get(s.strip().lower())
+    if persian:
+        return persian, STYLE_PRESETS[persian]
+    if key in STYLE_PRESETS:
+        return key, STYLE_PRESETS[key]
+    # Free-form: just use the user's text as the style description
+    return None, s.strip()
+
+
+def _parse_age_delta(s: str) -> int | None:
+    """Parse `+20`, `-10`, `20y`, `-5 years`, `۲۰` (Persian digits) → signed int.
+    Returns None on garbage. Capped at ±80 to keep prompts realistic."""
+    if not s:
+        return None
+    # Convert Persian/Arabic digits to ASCII
+    trans = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+    s = s.strip().translate(trans)
+    m = re.match(r"^\s*([+\-]?)\s*(\d{1,3})\s*(?:y|yrs|years|سال)?\s*$", s, re.I)
+    if not m:
+        return None
+    sign = -1 if m.group(1) == "-" else 1
+    n = int(m.group(2))
+    if n == 0 or n > 80:
+        return None
+    return sign * n
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}style(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_style(event):
+    arg = event.pattern_match.group(1)
+    if not arg or not arg.strip():
+        await event.edit(t("style_usage", p=CMD_PREFIX))
+        return
+    key, description = _resolve_style(arg.strip())
+    label_for_user = key or arg.strip()
+    prompt = (
+        f"Restyle this image as: {description}. "
+        f"Preserve the main subject's identity, pose, and overall composition. "
+        f"Only change the artistic style — no extra elements added or removed."
+    )
+    await _do_image_transform(
+        event,
+        edit_prompt=prompt,
+        processing_label=t("style_processing", s=label_for_user),
+        caption_label=t("style_caption", s=label_for_user),
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}aged?(?:\s+(\S+))?$"))
+@owner_only
+async def cmd_aged(event):
+    arg = event.pattern_match.group(1)
+    delta = _parse_age_delta(arg) if arg else None
+    if delta is None:
+        await event.edit(t("aged_usage", p=CMD_PREFIX))
+        return
+    direction = "older" if delta > 0 else "younger"
+    years = abs(delta)
+    prompt = (
+        f"Make the person in this photo look exactly {years} years {direction}. "
+        f"Preserve their identity, gender, ethnicity, hairstyle (adjust only for natural aging), "
+        f"facial features, clothing and the background scene. "
+        f"Photorealistic result, same lighting, same camera angle."
+    )
+    label = f"{'+' if delta > 0 else '-'}{years}"
+    await _do_image_transform(
+        event,
+        edit_prompt=prompt,
+        processing_label=t("aged_processing", y=label),
+        caption_label=t("aged_caption", y=label),
+    )
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}cartoon(?:\s+(\S+))?$"))
+@owner_only
+async def cmd_cartoon(event):
+    arg = (event.pattern_match.group(1) or "pixar").strip()
+    # Cartoon defaults to pixar but accepts any of: pixar/disney/anime/ghibli
+    key, description = _resolve_style(arg)
+    if not key or key not in {"pixar", "disney", "anime", "ghibli"}:
+        # Force a sensible default if user passed something exotic
+        key, description = "pixar", STYLE_PRESETS["pixar"]
+    prompt = (
+        f"Transform this photo into {description}. "
+        f"Keep the subject's identity recognizable through cartoon features. "
+        f"Maintain the original pose, composition, and background context but in the new style."
+    )
+    await _do_image_transform(
+        event,
+        edit_prompt=prompt,
+        processing_label=t("cartoon_processing", s=key),
+        caption_label=t("cartoon_caption", s=key),
+    )
+
+
 # ═════════ OCR (NEW) ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}ocr$"))
 @owner_only
@@ -2683,6 +2931,124 @@ async def cmd_tldr(event):
                                       link_preview=False,
                                       reply_to=reply_to)
     log.info(f"[.tldr] summarised {len(urls)} URL(s)")
+
+
+# ═════════ Chat summariser (.sum) ═════════
+async def _fetch_chat_messages(event, limit: int) -> tuple[list[str], int]:
+    """Pull up to `limit` recent messages (newest → oldest) and format them as
+    'Name: text' lines. Skips empty/service messages and the user's own commands.
+    Returns (lines_oldest_to_newest, actual_count).
+    """
+    me = await client.get_me()
+    own_id = me.id
+    lines: list[str] = []
+    name_cache: dict[int, str] = {}
+    try:
+        async for msg in client.iter_messages(event.chat_id, limit=limit + 20):
+            text = (msg.raw_text or "").strip()
+            if not text:
+                # Mark media-only msgs with a tiny placeholder so the AI has context
+                if msg.photo:
+                    text = "[photo]"
+                elif msg.video or msg.video_note:
+                    text = "[video]"
+                elif msg.voice:
+                    text = "[voice note]"
+                elif msg.sticker:
+                    text = "[sticker]"
+                elif msg.document:
+                    text = "[file]"
+                else:
+                    continue
+            # Skip the owner's own bot commands
+            if msg.sender_id == own_id and text.startswith(CMD_PREFIX):
+                continue
+            # Resolve sender display name (cached)
+            sid = msg.sender_id or 0
+            name = name_cache.get(sid)
+            if name is None:
+                if sid == own_id:
+                    name = "Me"
+                else:
+                    try:
+                        s = await msg.get_sender()
+                        if s is None:
+                            name = "Unknown"
+                        elif getattr(s, "first_name", None):
+                            name = s.first_name
+                            if getattr(s, "last_name", None):
+                                name = f"{name} {s.last_name}"
+                        elif getattr(s, "title", None):
+                            name = s.title
+                        elif getattr(s, "username", None):
+                            name = f"@{s.username}"
+                        else:
+                            name = "Unknown"
+                    except Exception:  # noqa: BLE001
+                        name = "Unknown"
+                name_cache[sid] = name[:30]
+            # Trim very long messages so we fit in the AI context window
+            if len(text) > 500:
+                text = text[:500] + "…"
+            lines.append(f"{name_cache[sid]}: {text}")
+            if len(lines) >= limit:
+                break
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.sum] iter_messages failed: {e}")
+        raise
+    lines.reverse()  # chronological order
+    return lines, len(lines)
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}sum(?:\s+(\d+))?$"))
+@owner_only
+async def cmd_summary(event):
+    arg = event.pattern_match.group(1)
+    if arg is None:
+        n = 50
+    else:
+        n = max(5, min(200, int(arg)))
+    status = await event.edit(t("sum_reading", n=n))
+    try:
+        lines, count = await _fetch_chat_messages(event, n)
+    except Exception as e:  # noqa: BLE001
+        await status.edit(t("sum_failed", e=str(e)[:200]))
+        return
+    if not lines:
+        await status.edit(t("sum_no_msgs"))
+        return
+
+    # Pack a compact transcript for Gemini. Hard cap so we always stay safely
+    # below the context window (≈8KB body keeps fast models snappy).
+    transcript = "\n".join(lines)[-7500:]
+    prompt = (
+        "Summarise the following Telegram chat transcript in **Persian (Farsi)**. "
+        "Format with these sections (use bold headers):\n"
+        "**🎯 موضوعات اصلی** — 3-5 bullets covering the main topics discussed\n"
+        "**💡 نکات کلیدی** — 3-5 bullets with key facts, opinions or insights shared\n"
+        "**❓ سؤالات/پیشنهادات بدون پاسخ** — only if any exist\n"
+        "**✅ تصمیمات/اقدامات** — only if any decisions were made or actions agreed on\n\n"
+        "Rules:\n"
+        "• No preamble, no 'Here is the summary', no closing remarks.\n"
+        "• Be concise — one line per bullet, bold key terms with **double asterisks**.\n"
+        "• If the chat is mostly small talk or off-topic banter, just give 3-4 bullets describing the vibe.\n"
+        "• Skip empty sections entirely (no 'N/A').\n\n"
+        f"=== TRANSCRIPT ({count} messages, oldest → newest) ===\n{transcript}"
+    )
+    summary = await _ai_summarise(prompt)
+    if not summary:
+        await status.edit(t("sum_failed", e="AI returned nothing"))
+        return
+    out = t("sum_header", n=count, s=summary)
+    if len(out) <= 3900:
+        await status.edit(out, link_preview=False)
+    else:
+        await status.edit(out[:3900] + "\n\n…", link_preview=False)
+        rest = out[3900:]
+        while rest:
+            piece, rest = rest[:3900], rest[3900:]
+            await client.send_message(event.chat_id, piece, link_preview=False)
+    log.info(f"[.sum] summarised {count} messages in chat {event.chat_id}")
 
 
 # ═════════ Bot UI Language ═════════
