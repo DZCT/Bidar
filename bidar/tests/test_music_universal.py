@@ -696,6 +696,135 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
 
 
+class TestTranslateAutoDetect(unittest.TestCase):
+    """`.tl` smart language detection + target resolution."""
+
+    def test_is_persian_text(self):
+        self.assertTrue(bidar._is_persian_text("سلام دنیا"))
+        self.assertTrue(bidar._is_persian_text("سلام دنیا hello"))  # persian majority
+        self.assertFalse(bidar._is_persian_text("hello world"))
+        self.assertFalse(bidar._is_persian_text("hola amigo"))
+        self.assertFalse(bidar._is_persian_text("hello سلام"))  # latin majority
+        self.assertFalse(bidar._is_persian_text(""))
+        self.assertFalse(bidar._is_persian_text("12345"))  # no letters at all
+
+    def test_resolve_target_lang_persian_names(self):
+        self.assertEqual(bidar._resolve_target_lang("عربی hello there"),
+                         ("ar", "hello there"))
+        self.assertEqual(bidar._resolve_target_lang("اسپانیایی سلام"),
+                         ("es", "سلام"))
+        self.assertEqual(bidar._resolve_target_lang("ژاپنی text"),
+                         ("ja", "text"))
+        self.assertEqual(bidar._resolve_target_lang("کردی"),
+                         ("ku", ""))
+
+    def test_resolve_target_lang_english_names(self):
+        self.assertEqual(bidar._resolve_target_lang("arabic hello"),
+                         ("ar", "hello"))
+        self.assertEqual(bidar._resolve_target_lang("ARABIC text"),
+                         ("ar", "text"))
+        self.assertEqual(bidar._resolve_target_lang("french bonjour"),
+                         ("fr", "bonjour"))
+
+    def test_resolve_target_lang_iso_codes(self):
+        self.assertEqual(bidar._resolve_target_lang("es hello"),
+                         ("es", "hello"))
+        self.assertEqual(bidar._resolve_target_lang("ja text"),
+                         ("ja", "text"))
+
+    def test_resolve_target_lang_multiword(self):
+        self.assertEqual(bidar._resolve_target_lang("ترکی استانبولی merhaba"),
+                         ("tr", "merhaba"))
+        self.assertEqual(bidar._resolve_target_lang("ترکی آذری salam"),
+                         ("az", "salam"))
+
+    def test_resolve_target_lang_no_match(self):
+        # Plain text with no leading language token → return (None, original)
+        self.assertEqual(bidar._resolve_target_lang("hello world"),
+                         (None, "hello world"))
+        self.assertEqual(bidar._resolve_target_lang("سلام دنیا"),
+                         (None, "سلام دنیا"))
+
+    def test_resolve_target_lang_strips_trailing_punct(self):
+        # `.tl عربی,` should still resolve `عربی`
+        self.assertEqual(bidar._resolve_target_lang("عربی, سلام"),
+                         ("ar", "سلام"))
+
+
+class TestTranslateAutoDirection(unittest.IsolatedAsyncioTestCase):
+    """End-to-end: `.tl <text>` without explicit lang picks fa↔en correctly."""
+
+    async def test_persian_input_translated_to_english(self):
+        captured = {}
+
+        async def fake_translate(text, target):
+            captured["text"] = text
+            captured["target"] = target
+            return "Hello world"
+
+        from unittest.mock import AsyncMock
+        ev = MagicMock()
+        ev.is_reply = False
+        ev.sender_id = 12345
+        ev.pattern_match = MagicMock()
+        ev.pattern_match.group = MagicMock(return_value="سلام دنیا")
+        ev.edit = AsyncMock(return_value=MagicMock(edit=AsyncMock()))
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+        bidar.config["ai_enabled"] = True
+
+        with patch.object(bidar, "_translate_text", side_effect=fake_translate), \
+             patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "_is_owner", return_value=True):
+            await bidar.cmd_translate(ev)
+        self.assertEqual(captured["text"], "سلام دنیا")
+        self.assertEqual(captured["target"], "en")
+
+    async def test_english_input_translated_to_persian(self):
+        captured = {}
+
+        async def fake_translate(text, target):
+            captured["target"] = target
+            return "سلام"
+
+        from unittest.mock import AsyncMock
+        ev = MagicMock()
+        ev.is_reply = False
+        ev.sender_id = 12345
+        ev.pattern_match = MagicMock()
+        ev.pattern_match.group = MagicMock(return_value="hello world")
+        ev.edit = AsyncMock(return_value=MagicMock(edit=AsyncMock()))
+
+        with patch.object(bidar, "_translate_text", side_effect=fake_translate), \
+             patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "_is_owner", return_value=True):
+            await bidar.cmd_translate(ev)
+        self.assertEqual(captured["target"], "fa")
+
+    async def test_explicit_lang_overrides_auto(self):
+        """`.tl عربی hello` must translate to Arabic, not auto-detect to Persian."""
+        captured = {}
+
+        async def fake_translate(text, target):
+            captured["text"] = text
+            captured["target"] = target
+            return "مرحبا"
+
+        from unittest.mock import AsyncMock
+        ev = MagicMock()
+        ev.is_reply = False
+        ev.sender_id = 12345
+        ev.pattern_match = MagicMock()
+        ev.pattern_match.group = MagicMock(return_value="عربی hello there")
+        ev.edit = AsyncMock(return_value=MagicMock(edit=AsyncMock()))
+
+        with patch.object(bidar, "_translate_text", side_effect=fake_translate), \
+             patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "_is_owner", return_value=True):
+            await bidar.cmd_translate(ev)
+        self.assertEqual(captured["target"], "ar")
+        self.assertEqual(captured["text"], "hello there")
+
+
 class TestImageBytesDetection(unittest.TestCase):
     """Magic-byte detection used by `.r` vision support."""
 

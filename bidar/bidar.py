@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.11.1"
+VERSION = "1.11.2"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -284,8 +284,8 @@ I18N = {
     "tl_no_text": {"en": "❌ The replied message has no text.", "fa": "❌ پیام ریپلای شده متن نداره."},
     "tl_reply_error": {"en": "❌ Error fetching replied message: {e}", "fa": "❌ خطا در دریافت پیام ریپلای: {e}"},
     "tl_usage": {
-        "en": "🌐 **Translation usage:**\n\n  `{p}tl <text>` — translate text\n  reply + `{p}tl` — translate the replied message\n  `{p}lang <code>` — change default target\n\n🎯 Current target: `{t}`",
-        "fa": "🌐 **استفاده از ترجمه:**\n\n  `{p}tl <متن>` — ترجمه متن\n  ریپلای + `{p}tl` — ترجمه پیام ریپلای شده\n  `{p}lang <code>` — تغییر زبان مقصد\n\n🎯 زبان فعلی: `{t}`",
+        "en": "🌐 **Translation — auto fa↔en**\n\n  `{p}tl <text>` — Persian→English, anything else→Persian\n  `{p}tl <lang> <text>` — explicit target (e.g. `{p}tl arabic hello`)\n  reply + `{p}tl` — auto-translate replied message\n  reply + `{p}tl <lang>` — translate replied message to `<lang>`\n\n🌍 Languages: English/Persian names or ISO codes — `english`, `فارسی`, `arabic`, `عربی`, `spanish`, `اسپانیایی`, `french`, `فرانسوی`, `german`, `آلمانی`, `italian`, `russian`, `turkish`, `ترکی`, `japanese`, `ژاپنی`, `chinese`, `چینی`, `korean`, `کره‌ای`, `hindi`, `هندی`, `urdu`, `kurdish`, `کردی`, `dutch`, `portuguese`, `swedish`, `polish` ...",
+        "fa": "🌐 **ترجمه — تشخیص خودکار فارسی↔انگلیسی**\n\n  `{p}tl <متن>` — فارسی→انگلیسی، هر زبون دیگه→فارسی\n  `{p}tl <زبون> <متن>` — مقصد دستی (مثلاً `{p}tl عربی سلام`)\n  ریپلای + `{p}tl` — ترجمه خودکار پیام ریپلای‌شده\n  ریپلای + `{p}tl <زبون>` — ترجمه پیام ریپلای‌شده به اون زبون\n\n🌍 زبون‌های پشتیبانی‌شده (فارسی یا انگلیسی یا کد ISO): `انگلیسی`, `فارسی`, `عربی`, `اسپانیایی`, `فرانسوی`, `آلمانی`, `ایتالیایی`, `روسی`, `ترکی`, `ترکی استانبولی`, `ژاپنی`, `چینی`, `کره‌ای`, `هندی`, `اردو`, `کردی`, `آذری`, `هلندی`, `پرتغالی`, `سوئدی`, `لهستانی`, `یونانی`, `عبری`, `ویتنامی`, `تایلندی`, `اندونزیایی` ...",
     },
     "tl_processing": {"en": "🌐 Translating...", "fa": "🌐 در حال ترجمه..."},
     "tl_result": {"en": "🌐 **Translation ({t}):**\n\n{txt}", "fa": "🌐 **ترجمه ({t}):**\n\n{txt}"},
@@ -577,7 +577,9 @@ I18N = {
             "     • example: reply to a photo with `{p}r چه برندی؟` / `{p}r what's wrong here?`\n\n"
             "🌐 **Translation**\n"
             "  `{p}lang <code>` — set default target language\n"
-            "  `{p}tl <text>` — translate to default language\n"
+            "  `{p}tl <text>` — auto fa↔en (Persian→English, else→Persian)\n"
+            "  `{p}tl <lang> <text>` — explicit target (e.g. `{p}tl arabic hello`)\n"
+            "  reply + `{p}tl [lang]` — translate replied message\n"
             "  reply + `{p}tl` — translate replied message\n"
             "  `{p}to <code> <text>` — edit message to that language\n"
             "     example: `{p}to en سلام چطوری`\n\n"
@@ -643,7 +645,9 @@ I18N = {
             "     • مثال: روی عکس ریپلای + `{p}r چه برندی؟` یا `{p}r این چیه؟`\n\n"
             "🌐 **ترجمه**\n"
             "  `{p}lang <code>` — تنظیم زبان پیش‌فرض (fa, en, ar, ...)\n"
-            "  `{p}tl <متن>` — ترجمه به زبان پیش‌فرض\n"
+            "  `{p}tl <متن>` — تشخیص خودکار فارسی↔انگلیسی\n"
+            "  `{p}tl <زبون> <متن>` — مقصد دستی (مثلاً `{p}tl عربی سلام`)\n"
+            "  ریپلای + `{p}tl [زبون]` — ترجمه پیام ریپلای‌شده\n"
             "  ریپلای + `{p}tl` — ترجمه پیام ریپلای شده\n"
             "  `{p}to <code> <متن>` — متن رو ادیت می‌کنه به زبان دیگه\n"
             "     مثال: `{p}to en سلام چطوری`\n\n"
@@ -1056,6 +1060,104 @@ async def _translate_text(text: str, target_lang: str) -> str | None:
     except Exception as e:  # noqa: BLE001
         log.error(f"Translate error: {e}")
         return None
+
+
+# ────────── Language detection / target-lang resolution for .tl ──────────
+# User-facing names (English + Persian) → ISO 639-1 code. Order doesn't matter
+# but multi-word entries must be looked up before single-word ones (see
+# `_resolve_target_lang` which scans 3→2→1 word prefixes).
+LANG_ALIASES: dict[str, str] = {
+    # English names + ISO codes
+    "english": "en", "en": "en", "eng": "en",
+    "persian": "fa", "farsi": "fa", "fa": "fa", "per": "fa", "fas": "fa",
+    "arabic": "ar", "ar": "ar",
+    "spanish": "es", "es": "es",
+    "french": "fr", "fr": "fr",
+    "german": "de", "de": "de",
+    "italian": "it", "it": "it",
+    "russian": "ru", "ru": "ru",
+    "turkish": "tr", "tr": "tr",
+    "japanese": "ja", "ja": "ja", "jp": "ja", "jpn": "ja",
+    "chinese": "zh", "zh": "zh", "cn": "zh", "chn": "zh", "mandarin": "zh",
+    "korean": "ko", "ko": "ko", "kr": "ko", "kor": "ko",
+    "hindi": "hi", "hi": "hi",
+    "urdu": "ur", "ur": "ur",
+    "dutch": "nl", "nl": "nl",
+    "portuguese": "pt", "pt": "pt",
+    "swedish": "sv", "sv": "sv",
+    "polish": "pl", "pl": "pl",
+    "kurdish": "ku", "ku": "ku",
+    "azerbaijani": "az", "az": "az", "azeri": "az",
+    "ukrainian": "uk", "uk": "uk",
+    "greek": "el", "el": "el",
+    "hebrew": "he", "he": "he",
+    "vietnamese": "vi", "vi": "vi",
+    "thai": "th", "th": "th",
+    "indonesian": "id", "id": "id",
+    # Persian (Farsi) names
+    "انگلیسی": "en", "اینگلیسی": "en", "آمریکایی": "en",
+    "فارسی": "fa",
+    "عربی": "ar",
+    "اسپانیایی": "es", "اسپانیولی": "es", "اسپانیش": "es",
+    "فرانسوی": "fr", "فرانسه": "fr", "فرانسه‌ای": "fr",
+    "آلمانی": "de", "آلمان": "de",
+    "ایتالیایی": "it", "ایتالیا": "it",
+    "روسی": "ru", "روسیه": "ru",
+    "ترکی": "tr", "ترکی استانبولی": "tr",
+    "ژاپنی": "ja", "ژاپن": "ja",
+    "چینی": "zh", "چین": "zh", "ماندارین": "zh",
+    "کره‌ای": "ko", "کره ای": "ko", "کره": "ko",
+    "هندی": "hi", "هند": "hi",
+    "اردو": "ur",
+    "هلندی": "nl", "هلند": "nl",
+    "پرتغالی": "pt", "پرتغال": "pt",
+    "سوئدی": "sv", "سوئد": "sv",
+    "لهستانی": "pl", "لهستان": "pl",
+    "کردی": "ku",
+    "آذری": "az", "ترکی آذری": "az", "آذربایجانی": "az",
+    "اوکراینی": "uk",
+    "یونانی": "el",
+    "عبری": "he",
+    "ویتنامی": "vi",
+    "تایلندی": "th",
+    "اندونزیایی": "id",
+}
+
+
+def _resolve_target_lang(s: str) -> tuple[str | None, str]:
+    """If `s` starts with a known language token (English/Persian name or ISO
+    code), return (iso_code, remaining_text). Otherwise return (None, s).
+
+    Scans the first 3, then 2, then 1 word(s) so multi-word names like
+    'ترکی استانبولی' resolve before their first word alone.
+    """
+    if not s:
+        return None, ""
+    s = s.strip()
+    if not s:
+        return None, ""
+    # Match against the longest possible leading n-word prefix
+    words = s.split()
+    for n in (min(3, len(words)), 2, 1):
+        if n > len(words):
+            continue
+        candidate = " ".join(words[:n]).lower().strip(".,!?:;")
+        if candidate in LANG_ALIASES:
+            rest = " ".join(words[n:]).strip()
+            return LANG_ALIASES[candidate], rest
+    return None, s
+
+
+def _is_persian_text(text: str) -> bool:
+    """True if `text` is predominantly Persian/Arabic script. Used by .tl to
+    decide auto fa↔en direction when the user didn't specify a target."""
+    if not text:
+        return False
+    persian = sum(1 for c in text if "\u0600" <= c <= "\u06FF")
+    latin = sum(1 for c in text if c.isascii() and c.isalpha())
+    # Tie or no letters at all → treat as Persian (so we send to English),
+    # since the user is Persian-speaking by default.
+    return persian >= latin and persian > 0
 
 
 # ────────── Image aspect-ratio helpers ──────────
@@ -2501,24 +2603,45 @@ async def cmd_lang(event):
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}tl(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_translate(event):
-    target = config.get("translate_target", "fa")
-    text_arg = event.pattern_match.group(1)
-    if text_arg:
-        source_text = text_arg.strip()
+    """Smart translator with auto fa↔en detection.
+
+    Behaviour:
+      .tl <text>            → Persian text → English, anything else → Persian
+      .tl <lang> <text>     → translate to <lang> (e.g. `.tl عربی hello`)
+      .tl  (reply)          → auto fa↔en on the replied message
+      .tl <lang> (reply)    → translate replied message to <lang>
+                              (e.g. reply + `.tl عربی`)
+    """
+    raw_arg = (event.pattern_match.group(1) or "").strip()
+    explicit_target: str | None = None
+    arg_text = raw_arg
+
+    if raw_arg:
+        lang_code, remaining = _resolve_target_lang(raw_arg)
+        if lang_code:
+            explicit_target = lang_code
+            arg_text = remaining
+
+    # Resolve source text — inline arg wins over replied message
+    if arg_text:
+        source_text = arg_text
     elif event.is_reply:
         try:
             replied = await event.get_reply_message()
-            if replied and (replied.raw_text or replied.text):
-                source_text = replied.raw_text or replied.text or ""
-            else:
+            source_text = ((replied.raw_text or replied.text or "") if replied else "").strip()
+            if not source_text:
                 await event.edit(t("tl_no_text"))
                 return
         except Exception as e:  # noqa: BLE001
             await event.edit(t("tl_reply_error", e=str(e)))
             return
     else:
-        await event.edit(t("tl_usage", p=CMD_PREFIX, t=target))
+        await event.edit(t("tl_usage", p=CMD_PREFIX, t="auto fa↔en"))
         return
+
+    # Auto-detect direction when user didn't specify a target language
+    target = explicit_target or ("en" if _is_persian_text(source_text) else "fa")
+
     msg = await event.edit(t("tl_processing"))
     translated = await _translate_text(source_text, target)
     if translated:
