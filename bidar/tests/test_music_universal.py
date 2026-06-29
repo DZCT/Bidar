@@ -696,6 +696,37 @@ class TestGenerateImagePassesAR(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured.get("image_config"), {"aspect_ratio": "9:16"})
 
 
+class TestImageBytesDetection(unittest.TestCase):
+    """Magic-byte detection used by `.r` vision support."""
+
+    def test_jpeg_detected(self):
+        self.assertTrue(bidar._is_supported_image_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20))
+        self.assertTrue(bidar._is_supported_image_bytes(b"\xff\xd8\xff\xe1" + b"\x00" * 20))
+        self.assertTrue(bidar._is_supported_image_bytes(b"\xff\xd8\xff\xdb" + b"\x00" * 20))
+
+    def test_png_detected(self):
+        self.assertTrue(bidar._is_supported_image_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20))
+
+    def test_gif_detected(self):
+        self.assertTrue(bidar._is_supported_image_bytes(b"GIF87a" + b"\x00" * 20))
+        self.assertTrue(bidar._is_supported_image_bytes(b"GIF89a" + b"\x00" * 20))
+
+    def test_webp_detected(self):
+        self.assertTrue(bidar._is_supported_image_bytes(b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 20))
+
+    def test_unsupported_formats(self):
+        # Animated sticker .tgs — must NOT be sent to vision model
+        self.assertFalse(bidar._is_supported_image_bytes(b"\x1f\x8b" + b"\x00" * 20))  # gzip header (.tgs)
+        # WEBM video sticker
+        self.assertFalse(bidar._is_supported_image_bytes(b"\x1aE\xdf\xa3" + b"\x00" * 20))
+        # MP4 / random docs
+        self.assertFalse(bidar._is_supported_image_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 20))
+        self.assertFalse(bidar._is_supported_image_bytes(b"PK\x03\x04" + b"\x00" * 20))  # zip
+        # Too small / empty
+        self.assertFalse(bidar._is_supported_image_bytes(b""))
+        self.assertFalse(bidar._is_supported_image_bytes(b"\xff\xd8"))  # 2 bytes only
+
+
 class TestStyleAgedHelpers(unittest.TestCase):
     def test_resolve_style_english_presets(self):
         for k in ("vangogh", "anime", "ghibli", "pixar", "cyberpunk", "lego", "noir"):

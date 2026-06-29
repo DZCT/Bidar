@@ -66,7 +66,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.11.0"
+VERSION = "1.11.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -571,7 +571,10 @@ I18N = {
             "  `{p}aimodel <model>` — change AI model\n"
             "  `{p}groupcd <s>` — group cooldown (0=no limit)\n"
             "  `{p}aireset` — clear AI conversation memory\n"
-            "  `{p}r [hint]` — **manually generate** AI reply for current chat\n\n"
+            "  `{p}r [hint]` — **manually generate** AI reply for current chat\n"
+            "     • reply to a message to focus on it\n"
+            "     • reply to an **image** → AI analyses the picture & answers your question about it\n"
+            "     • example: reply to a photo with `{p}r چه برندی؟` / `{p}r what's wrong here?`\n\n"
             "🌐 **Translation**\n"
             "  `{p}lang <code>` — set default target language\n"
             "  `{p}tl <text>` — translate to default language\n"
@@ -634,7 +637,10 @@ I18N = {
             "  `{p}aimodel <مدل>` — تغییر مدل\n"
             "  `{p}groupcd <s>` — cooldown گروه (۰=بدون محدودیت)\n"
             "  `{p}aireset` — پاک کردن حافظه مکالمات\n"
-            "  `{p}r [hint]` — **تولید پاسخ دستی** با AI بر اساس چت فعلی\n\n"
+            "  `{p}r [hint]` — **تولید پاسخ دستی** با AI بر اساس چت فعلی\n"
+            "     • روی یه پیام ریپلای بزن تا روی همون تمرکز کنه\n"
+            "     • روی یه **عکس** ریپلای بزن → AI عکس رو تحلیل می‌کنه و به سؤالت جواب می‌ده\n"
+            "     • مثال: روی عکس ریپلای + `{p}r چه برندی؟` یا `{p}r این چیه؟`\n\n"
             "🌐 **ترجمه**\n"
             "  `{p}lang <code>` — تنظیم زبان پیش‌فرض (fa, en, ar, ...)\n"
             "  `{p}tl <متن>` — ترجمه به زبان پیش‌فرض\n"
@@ -2332,6 +2338,23 @@ async def cmd_groupcd(event):
 
 
 # ═════════ .r — manual AI reply generation ═════════
+def _is_supported_image_bytes(data: bytes) -> bool:
+    """True if `data` looks like a JPEG/PNG/GIF/WEBP — formats Gemini Vision
+    accepts natively. Animated stickers (.tgs) and video stickers (.webm) are
+    rejected so we don't waste a vision call on them."""
+    if not data or len(data) < 12:
+        return False
+    if data[:3] == b"\xff\xd8\xff":  # JPEG (any variant)
+        return True
+    if data[:8] == b"\x89PNG\r\n\x1a\n":  # PNG
+        return True
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return False
+
+
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}r(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_generate_reply(event):
@@ -2367,6 +2390,7 @@ async def cmd_generate_reply(event):
         log.warning(f"cmd_r: failed to fetch context: {e}")
 
     target_text: str | None = None
+    image_b64: str | None = None
     if event.is_reply:
         try:
             replied = await event.get_reply_message()
@@ -2374,25 +2398,60 @@ async def cmd_generate_reply(event):
                 tt = (replied.raw_text or replied.text or "").strip()
                 if tt:
                     target_text = tt[:500]
+                # Vision support: if the replied message contains an image
+                # (photo / image document / static sticker), download it and
+                # attach to the prompt so the model can SEE and reason about it.
+                has_visual = bool(
+                    replied.photo
+                    or (replied.document and
+                        (getattr(replied.document, "mime_type", "") or "")
+                        .startswith("image/"))
+                )
+                if has_visual:
+                    try:
+                        img_bytes = await client.download_media(replied, file=bytes)
+                        if (img_bytes and isinstance(img_bytes, bytes)
+                                and _is_supported_image_bytes(img_bytes)):
+                            image_b64 = base64.b64encode(img_bytes).decode("utf-8")
+                            log.info(f"[.r] attached image to prompt ({len(img_bytes)//1024}KB)")
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(f"cmd_r: image download failed: {e}")
         except Exception:  # noqa: BLE001
             pass
 
     context_str = "\n".join(context_lines) if context_lines else "(no recent context)"
     chat_type = "private chat" if event.is_private else "group chat"
 
-    system_msg = (
-        f"You are replying as 'You' in a real Telegram conversation. This is a {chat_type}. "
-        "Generate a natural, contextually-appropriate message that 'You' would send right now. "
-        "Match the tone, style, and language of the conversation (if it's Persian, reply in Persian; "
-        "if English, reply in English; etc). Keep it short and natural. "
-        "Do NOT introduce yourself as AI, bot, or assistant. "
-        "Output ONLY the message text — no quotes, no labels, no explanations."
-    )
+    if image_b64:
+        # Image-aware system prompt: model gets a picture + (optional) question
+        system_msg = (
+            f"You are replying as 'You' in a real Telegram {chat_type}. The user has "
+            "replied to a message that contains an IMAGE which is attached to this prompt. "
+            "Look at the image carefully and use it to inform your reply. "
+            "If the user asked a question, answer it precisely based on what's actually "
+            "visible in the image. If there's no explicit question, write a natural, "
+            "context-appropriate reply that meaningfully reacts to the image and the "
+            "ongoing conversation. "
+            "Match the language of the conversation (Persian → Persian, English → English). "
+            "Do NOT introduce yourself as AI, bot, or assistant. "
+            "Output ONLY the message text — no quotes, no labels, no preamble."
+        )
+    else:
+        system_msg = (
+            f"You are replying as 'You' in a real Telegram conversation. This is a {chat_type}. "
+            "Generate a natural, contextually-appropriate message that 'You' would send right now. "
+            "Match the tone, style, and language of the conversation (if it's Persian, reply in Persian; "
+            "if English, reply in English; etc). Keep it short and natural. "
+            "Do NOT introduce yourself as AI, bot, or assistant. "
+            "Output ONLY the message text — no quotes, no labels, no explanations."
+        )
     parts = [f"Recent conversation:\n{context_str}"]
     if target_text:
         parts.append(f"\n(Focus on this message:)\n{target_text}")
+    if image_b64:
+        parts.append("\n(An image is attached to this prompt — examine it carefully.)")
     if hint:
-        parts.append(f"\n(Additional instruction: {hint})")
+        parts.append(f"\n(Additional instruction / question: {hint})")
     parts.append("\nNow write the reply:")
     user_prompt = "\n".join(parts)
 
@@ -2402,7 +2461,12 @@ async def cmd_generate_reply(event):
             session_id=f"genreply-{time.time_ns()}",
             system_message=system_msg,
         ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
-        resp = await chat.send_message(UserMessage(text=user_prompt))
+        if image_b64 and ImageContent is not None:
+            user_msg = UserMessage(text=user_prompt,
+                                   file_contents=[ImageContent(image_b64)])
+        else:
+            user_msg = UserMessage(text=user_prompt)
+        resp = await chat.send_message(user_msg)
         reply_text = str(resp).strip()
         if (reply_text.startswith('"') and reply_text.endswith('"')) or \
            (reply_text.startswith("«") and reply_text.endswith("»")):
@@ -2412,7 +2476,10 @@ async def cmd_generate_reply(event):
             return
         stats["ai_replies"] += 1
         await event.edit(reply_text)
-        log.info(f"[.r] generated in chat={event.chat_id} len={len(reply_text)}")
+        log.info(
+            f"[.r] generated in chat={event.chat_id} len={len(reply_text)} "
+            f"vision={'yes' if image_b64 else 'no'}"
+        )
     except Exception as e:  # noqa: BLE001
         log.error(f"cmd_r error: {e}")
         await event.edit(t("r_error", e=str(e)))
