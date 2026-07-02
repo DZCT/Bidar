@@ -50,6 +50,14 @@ except ImportError:
     UserMessage = None  # type: ignore
     ImageContent = None  # type: ignore
 
+# Optional: Text-to-Speech via Emergent Universal Key (OpenAI TTS)
+try:
+    from emergentintegrations.llm.openai import OpenAITextToSpeech  # type: ignore
+    TTS_LIB_OK = True
+except ImportError:
+    TTS_LIB_OK = False
+    OpenAITextToSpeech = None  # type: ignore
+
 # Optional: SoundCloud download via yt-dlp
 try:
     import yt_dlp  # type: ignore
@@ -67,7 +75,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.11.3"
+VERSION = "1.12.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -110,6 +118,9 @@ _DEFAULT_CONFIG = {
     "image_model": "gemini-3.1-flash-image-preview",
     # Default aspect ratio for .img / .imgedit (see SUPPORTED_AR for valid values).
     "image_aspect_ratio": "1:1",
+    # Text-to-speech (.say)
+    "tts_voice": "nova",
+    "tts_model": "tts-1-hd",
     # UI language
     "bot_lang": "en",  # "en" or "fa"
     # Music (auto-detect & download from any platform)
@@ -414,6 +425,33 @@ I18N = {
         "fa": "❌ متنی در تصویر یافت نشد (یا قابل خوندن نبود).",
     },
 
+    # Text-to-Speech (.say / .voice)
+    "say_usage": {
+        "en": "🔊 **Text-to-Speech**\n\n  `{p}say <text>` — send text as a voice message\n  reply + `{p}say` — speak the replied message\n  `{p}say -v onyx <text>` — override voice for this message\n\n🎙 Current voice: `{v}` · model: `{m}`\n🌍 Supports Persian, English, Arabic & 50+ languages (auto-detected).\n\n🎛 Change default voice: `{p}voice <name>`",
+        "fa": "🔊 **تبدیل متن به گفتار**\n\n  `{p}say <متن>` — متن رو به صورت ویس می‌فرسته\n  ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n  `{p}say -v onyx <متن>` — انتخاب صدا فقط برای همین ویس\n\n🎙 صدای فعلی: `{v}` · مدل: `{m}`\n🌍 فارسی، انگلیسی، عربی و بیش از ۵۰ زبان (تشخیص خودکار).\n\n🎛 تغییر صدای پیش‌فرض: `{p}voice <نام>`",
+    },
+    "say_not_ready": {
+        "en": "❌ **Voice unavailable:** {err}\n\n🔧 Set `EMERGENT_LLM_KEY=...` in `.env` and restart, or reinstall:\n`pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`",
+        "fa": "❌ **قابلیت صدا در دسترس نیست:** {err}\n\n🔧 در `.env` مقدار `EMERGENT_LLM_KEY=...` رو ست کن و ری‌استارت کن، یا نصب مجدد:\n`pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`",
+    },
+    "say_processing": {"en": "🔊 Generating voice ({v})...", "fa": "🔊 در حال ساخت ویس ({v})..."},
+    "say_reply_error": {"en": "❌ Error fetching replied message: {e}", "fa": "❌ خطا در دریافت پیام ریپلای: {e}"},
+    "say_send_failed": {"en": "❌ Failed to send voice: {e}", "fa": "❌ ارسال ویس ناموفق: {e}"},
+    "voice_show": {
+        "en": "🎙 **Voice settings**\n\n🔊 Voice: `{v}`\n📚 Model: `{m}`\n\n🌟 Available voices:\n  `alloy` neutral · `ash` clear · `coral` warm\n  `echo` calm · `fable` expressive · `nova` energetic\n  `onyx` deep · `sage` measured · `shimmer` bright\n\n🛠 Change:\n  `{p}voice nova`\n  `{p}voice model tts-1-hd` (HD) / `tts-1` (fast)",
+        "fa": "🎙 **تنظیمات صدا**\n\n🔊 صدا: `{v}`\n📚 مدل: `{m}`\n\n🌟 صداهای موجود:\n  `alloy` خنثی · `ash` شفاف · `coral` گرم\n  `echo` آروم · `fable` بیانگر · `nova` پرانرژی\n  `onyx` بم · `sage` متین · `shimmer` روشن\n\n🛠 تغییر:\n  `{p}voice nova`\n  `{p}voice model tts-1-hd` (کیفیت بالا) / `tts-1` (سریع)",
+    },
+    "voice_set": {"en": "✅ Default voice set to `{v}`.", "fa": "✅ صدای پیش‌فرض روی `{v}` تنظیم شد."},
+    "voice_invalid": {
+        "en": "⚠️ Unknown voice. Choose one of: `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`.\nSee `{p}voice` for details.",
+        "fa": "⚠️ صدای نامعتبر. یکی از این‌ها رو انتخاب کن: `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`.\nجزئیات: `{p}voice`",
+    },
+    "voice_model_set": {"en": "✅ TTS model set to `{m}`.", "fa": "✅ مدل صدا روی `{m}` تنظیم شد."},
+    "voice_model_invalid": {
+        "en": "⚠️ Model must be `tts-1` (fast) or `tts-1-hd` (HD).\nExample: `{p}voice model tts-1-hd`",
+        "fa": "⚠️ مدل باید `tts-1` (سریع) یا `tts-1-hd` (کیفیت بالا) باشه.\nمثال: `{p}voice model tts-1-hd`",
+    },
+
     # Bot language
     "botlang_show": {
         "en": "🌍 **Bot UI Language:** `{l}`\n\n🛠 To change:\n  `{p}botlang en` — English (default)\n  `{p}botlang fa` — Persian\n\nℹ️ This only changes the bot's UI messages (help, status, errors). Auto-reply, AI responses, and translation work independently.",
@@ -602,6 +640,12 @@ I18N = {
             "📰 **Web**\n"
             "  `{p}tldr <url>` — summarise a link (always in Persian)\n"
             "  reply + `{p}tldr` — auto-detect URLs in replied message\n\n"
+            "🔊 **Voice (Text-to-Speech)**\n"
+            "  `{p}say <text>` — send text as a natural voice message\n"
+            "     reply + `{p}say` — speak the replied message\n"
+            "     `{p}say -v onyx <text>` — override voice for this message\n"
+            "  `{p}voice [name]` — view/set default voice (9 voices)\n"
+            "  `{p}voice model tts-1|tts-1-hd` — set quality\n\n"
             "📊 **Chat**\n"
             "  `{p}sum [N]` — summarise last N messages (default 50, max 200)\n\n"
             "🔎 **Search**\n"
@@ -670,6 +714,12 @@ I18N = {
             "📰 **وب**\n"
             "  `{p}tldr <لینک>` — خلاصه‌سازی لینک (همیشه فارسی)\n"
             "  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n\n"
+            "🔊 **صدا (متن به گفتار)**\n"
+            "  `{p}say <متن>` — متن رو به صورت ویس طبیعی می‌فرسته\n"
+            "     ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n"
+            "     `{p}say -v onyx <متن>` — انتخاب صدا فقط برای همین ویس\n"
+            "  `{p}voice [نام]` — نمایش/تنظیم صدای پیش‌فرض (۹ صدا)\n"
+            "  `{p}voice model tts-1|tts-1-hd` — تنظیم کیفیت\n\n"
             "📊 **چت**\n"
             "  `{p}sum [N]` — خلاصه‌سازی N پیام آخر (پیش‌فرض ۵۰، حداکثر ۲۰۰)\n\n"
             "🔎 **جستجو**\n"
@@ -1365,6 +1415,107 @@ async def _ocr_image(image_bytes: bytes) -> str | None:
     except Exception as e:  # noqa: BLE001
         log.error(f"OCR error: {e}")
         return None
+
+
+# ────────── Text-to-Speech (.say) helpers ──────────
+TTS_VOICES: tuple[str, ...] = (
+    "alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+)
+TTS_MODELS: tuple[str, ...] = ("tts-1", "tts-1-hd")
+
+
+def _tts_ready() -> tuple[bool, str]:
+    if not TTS_LIB_OK:
+        return False, "emergentintegrations TTS module not available"
+    if not EMERGENT_LLM_KEY:
+        return False, "EMERGENT_LLM_KEY not set in .env"
+    return True, ""
+
+
+def _extract_voice_flag(text: str) -> tuple[str | None, str]:
+    """Pull an inline `-v onyx` / `--voice onyx` flag out of `text`.
+    Returns (voice_or_None, cleaned_text)."""
+    m = re.search(r"(?:^|\s)-{1,2}v(?:oice)?\s+([A-Za-z]+)", text, re.I)
+    if m:
+        v = m.group(1).lower()
+        if v in TTS_VOICES:
+            return v, (text[:m.start()] + " " + text[m.end():]).strip()
+    return None, text
+
+
+def _chunk_text(text: str, size: int) -> list[str]:
+    """Split `text` into <=`size`-char chunks on word boundaries (for the
+    OpenAI TTS 4096-char limit)."""
+    text = text.strip()
+    if len(text) <= size:
+        return [text]
+    chunks: list[str] = []
+    cur = ""
+    for word in text.split(" "):
+        if len(cur) + len(word) + 1 > size:
+            if cur:
+                chunks.append(cur)
+            cur = word[:size]
+        else:
+            cur = f"{cur} {word}".strip()
+    if cur:
+        chunks.append(cur)
+    return chunks or [text[:size]]
+
+
+def _opus_duration(data: bytes) -> int:
+    """Estimate an ogg-opus clip's duration (seconds) from the last Ogg page's
+    granule position. Opus granule positions are counted at 48 kHz."""
+    try:
+        idx = data.rfind(b"OggS")
+        if idx < 0 or idx + 14 > len(data):
+            return 0
+        granule = int.from_bytes(data[idx + 6:idx + 14], "little")
+        return max(0, round(granule / 48000))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _friendly_tts_error(err: str) -> tuple[str, str]:
+    """Map a raw TTS error to a (friendly_en, friendly_fa) message."""
+    e = (err or "").lower()
+    if "budget" in e and "exceeded" in e:
+        return (
+            "💸 Emergent key budget exceeded. Top up in Profile → Universal Key.",
+            "💸 اعتبار کلید Emergent تموم شده. از Profile → Universal Key شارژ کن.",
+        )
+    if "rate" in e and "limit" in e:
+        return ("⏳ Rate limit — wait a few seconds and try again.",
+                "⏳ محدودیت تعداد درخواست — چند ثانیه صبر کن.")
+    if any(k in e for k in ("invalid_api_key", "authentication", "unauthorized", "401")):
+        return ("🔑 Invalid EMERGENT_LLM_KEY. Check your .env file.",
+                "🔑 EMERGENT_LLM_KEY نامعتبره. فایل .env رو چک کن.")
+    if "timeout" in e or "timed out" in e:
+        return ("⌛ TTS timed out. Try again in a moment.",
+                "⌛ سرویس صدا پاسخ نداد. چند لحظه صبر کن.")
+    snippet = err.split("\n")[0][:180]
+    return (f"❌ Voice generation failed: `{snippet}`",
+            f"❌ ساخت ویس ناموفق بود: `{snippet}`")
+
+
+async def _tts_generate(text: str, voice: str, model: str,
+                        fmt: str = "opus") -> tuple[bytes | None, str | None]:
+    """Generate speech audio. Returns (audio_bytes, error_msg) — exactly one is None."""
+    ready, err = _tts_ready()
+    if not ready:
+        return None, err
+    if not text.strip():
+        return None, "empty text"
+    try:
+        tts = OpenAITextToSpeech(api_key=EMERGENT_LLM_KEY)
+        audio = await tts.generate_speech(
+            text=text, model=model, voice=voice, response_format=fmt)
+        if not audio:
+            return None, "no audio returned"
+        return audio, None
+    except Exception as e:  # noqa: BLE001
+        log.error(f"TTS error: {e}")
+        return None, str(e)
 
 
 # ────────── Music Helpers (Universal Downloader) ──────────
@@ -3065,6 +3216,105 @@ async def cmd_ocr(event):
     log.info(f"[.ocr] extracted {len(extracted)} chars from image")
 
 
+# ═════════ Text-to-Speech (.say / .voice) ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}say(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_say(event):
+    """Convert text to a natural voice message. `.say <text>` or reply + `.say`."""
+    ready, err = _tts_ready()
+    if not ready:
+        await event.edit(t("say_not_ready", err=err))
+        return
+    arg = (event.pattern_match.group(1) or "").strip()
+    voice_override, arg = _extract_voice_flag(arg) if arg else (None, "")
+
+    text = arg
+    replied = None
+    if not text and event.is_reply:
+        try:
+            replied = await event.get_reply_message()
+            text = ((replied.raw_text or replied.text or "") if replied else "").strip()
+        except Exception as e:  # noqa: BLE001
+            await event.edit(t("say_reply_error", e=str(e)))
+            return
+    if not text:
+        await event.edit(t("say_usage", p=CMD_PREFIX,
+                           v=config.get("tts_voice", "nova"),
+                           m=config.get("tts_model", "tts-1-hd")))
+        return
+
+    voice = voice_override or config.get("tts_voice", "nova")
+    model = config.get("tts_model", "tts-1-hd")
+    msg = await event.edit(t("say_processing", v=voice))
+
+    reply_to = (replied.id if replied else event.reply_to_msg_id)
+    chunks = _chunk_text(text, 4000)
+    sent_any = False
+    for chunk in chunks:
+        audio, gerr = await _tts_generate(chunk, voice, model, "opus")
+        if not audio:
+            en, fa = _friendly_tts_error(gerr or "")
+            await msg.edit(fa if config.get("bot_lang", "en") == "fa" else en)
+            return
+        tmp = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
+                f.write(audio)
+                tmp = f.name
+            await client.send_file(
+                event.chat_id, tmp,
+                voice_note=True,
+                attributes=[DocumentAttributeAudio(duration=_opus_duration(audio), voice=True)],
+                reply_to=reply_to,
+            )
+            sent_any = True
+        except Exception as e:  # noqa: BLE001
+            log.error(f"[.say] send failed: {e}")
+            await msg.edit(t("say_send_failed", e=str(e)))
+            return
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+    if sent_any:
+        try:
+            await msg.delete()
+        except Exception:  # noqa: BLE001
+            pass
+    log.info(f"[.say] sent {len(chunks)} voice msg(s) voice={voice} model={model}")
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}voice(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_voice(event):
+    """View/set the default TTS voice and model."""
+    arg = (event.pattern_match.group(1) or "").strip()
+    if not arg:
+        await event.edit(t("voice_show",
+                           v=config.get("tts_voice", "nova"),
+                           m=config.get("tts_model", "tts-1-hd"),
+                           p=CMD_PREFIX))
+        return
+    parts = arg.split()
+    if parts[0].lower() == "model":
+        if len(parts) < 2 or parts[1].lower() not in TTS_MODELS:
+            await event.edit(t("voice_model_invalid", p=CMD_PREFIX))
+            return
+        config["tts_model"] = parts[1].lower()
+        save_config()
+        await event.edit(t("voice_model_set", m=config["tts_model"]))
+        return
+    v = parts[0].lower()
+    if v not in TTS_VOICES:
+        await event.edit(t("voice_invalid", p=CMD_PREFIX))
+        return
+    config["tts_voice"] = v
+    save_config()
+    await event.edit(t("voice_set", v=v))
+
+
 # ═════════ TL;DR — Link summariser ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}tldr(?:\s+([\s\S]+))?$"))
 @owner_only
@@ -3500,6 +3750,7 @@ async def cmd_stats(event):
         f"{(' ' + t('no_limit')) if config.get('group_cooldown', 0) == 0 else ''}\n"
         f"  {t('stats_ai_sessions')}: `{len(_chat_sessions)}`\n\n"
         f"🎨 Image: `{config.get('image_model','-')}`  📐 `{config.get('image_aspect_ratio','1:1')}`\n"
+        f"🔊 Voice: `{config.get('tts_voice','nova')}`  📚 `{config.get('tts_model','tts-1-hd')}`\n"
         f"🎵 Music auto-detect: `{music_state}`\n"
         f"📋 Allowed groups: `{len(allowed)}`\n\n"
         f"{t('stats_received')}: `{stats['messages_received']}`\n"

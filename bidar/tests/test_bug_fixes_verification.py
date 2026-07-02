@@ -105,7 +105,9 @@ class TestDeadCodeRemoved:
         assert not hasattr(bidar, "_sc_download_and_send")
 
     def test_version_bumped(self):
-        assert bidar.VERSION == "1.11.3"
+        # Version must be >= 1.11.3 (semver-ish, monotonically increasing)
+        parts = tuple(int(x) for x in bidar.VERSION.split("."))
+        assert parts >= (1, 11, 3)
 
 
 # -------- Regressions --------

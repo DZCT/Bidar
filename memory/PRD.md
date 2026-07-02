@@ -125,6 +125,20 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.12.0 — `.say` Text-to-Speech (Voice Messages) (Completed Jun 2026)
+New feature: turn any text into a natural Telegram **voice message** via OpenAI TTS (Emergent Universal Key — no separate API key, no extra cost beyond key balance).
+- ✅ `.say <text>` — generate & send a voice message; `reply + .say` speaks the replied message
+- ✅ `.say -v onyx <text>` — per-message voice override flag
+- ✅ `.voice` — view/list voices + model; `.voice <name>` sets default (9 voices); `.voice model tts-1|tts-1-hd` sets quality
+- ✅ Output is **ogg-opus** (`response_format="opus"`, confirmed `OggS` container) → sent as a real Telegram voice note (`voice_note=True` + `DocumentAttributeAudio(voice=True)`), NO ffmpeg required
+- ✅ Duration computed cheaply from the last Ogg page granule position (`_opus_duration`) — no ffprobe needed
+- ✅ **Persian fully supported** (auto language detection) — live-verified with the real Emergent key (Persian → 13KB/3s ogg-opus, played as voice)
+- ✅ Text >4096 chars auto-chunked on word boundaries into multiple sequential voice messages (OpenAI 4096 limit)
+- ✅ Bilingual i18n for all new messages; help menu (en+fa) gets a `🔊 Voice` section; `.stats` shows voice+model
+- ✅ New config keys: `tts_voice` (default `nova`), `tts_model` (default `tts-1-hd`)
+- ✅ Helpers: `_tts_ready`, `_tts_generate`, `_extract_voice_flag`, `_chunk_text`, `_opus_duration`, `_friendly_tts_error`
+- ✅ Tests: **166 passing** (+15 new TTS tests + real E2E generate + mocked full cmd_say pipeline verifying voice_note=True & OggS output)
+
 ### v1.11.3 — Full-Project Code Review & Bug-Fix Release (Completed Jun 2026)
 User asked for a careful full-project review + fixes. 6 bugs fixed, all verified by testing agent (151/151 tests green):
 - ✅ **GitHub `.tldr` parse bug**: `repo.rstrip(".git")` mangled repo names ending in t/i/g/. (`audit`→`aud`, `chat`→`cha`). New `_parse_github_repo()` helper strips only a real `.git` suffix.

@@ -1384,5 +1384,102 @@ class TestBotMsgPrefixes(unittest.TestCase):
                 bidar._BOT_MSG_PREFIXES))
 
 
+# ────────────────────────────────────────────────────────────────────
+# Text-to-Speech (.say / .voice)
+# ────────────────────────────────────────────────────────────────────
+class TestTTSHelpers(unittest.TestCase):
+    def test_extract_voice_flag_short(self):
+        v, rest = bidar._extract_voice_flag("-v onyx read this out loud")
+        self.assertEqual(v, "onyx")
+        self.assertEqual(rest, "read this out loud")
+
+    def test_extract_voice_flag_long(self):
+        v, rest = bidar._extract_voice_flag("hello world --voice nova")
+        self.assertEqual(v, "nova")
+        self.assertEqual(rest, "hello world")
+
+    def test_extract_voice_flag_unknown_voice_ignored(self):
+        v, rest = bidar._extract_voice_flag("-v batman say hi")
+        self.assertIsNone(v)
+        self.assertEqual(rest, "-v batman say hi")
+
+    def test_extract_voice_flag_none(self):
+        v, rest = bidar._extract_voice_flag("just some plain text")
+        self.assertIsNone(v)
+        self.assertEqual(rest, "just some plain text")
+
+    def test_chunk_text_short_single(self):
+        self.assertEqual(bidar._chunk_text("hello", 4000), ["hello"])
+
+    def test_chunk_text_splits_on_words(self):
+        words = " ".join(["word"] * 2000)  # ~10k chars
+        chunks = bidar._chunk_text(words, 4000)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(c) <= 4000 for c in chunks))
+        # No content lost
+        self.assertEqual(" ".join(chunks).split(), words.split())
+
+    def test_opus_duration_from_oggs_header(self):
+        # Fake ogg page: 'OggS' + version + flags + 8-byte granule (LE)
+        granule = 48000 * 7  # 7 seconds at 48kHz
+        page = b"OggS" + b"\x00\x00" + granule.to_bytes(8, "little") + b"rest"
+        self.assertEqual(bidar._opus_duration(page), 7)
+
+    def test_opus_duration_bad_data(self):
+        self.assertEqual(bidar._opus_duration(b"not-ogg"), 0)
+        self.assertEqual(bidar._opus_duration(b""), 0)
+
+    def test_friendly_tts_error_budget(self):
+        en, fa = bidar._friendly_tts_error("Error: Budget has been exceeded!")
+        self.assertIn("budget", en.lower())
+        self.assertIn("اعتبار", fa)
+
+    def test_friendly_tts_error_generic(self):
+        en, fa = bidar._friendly_tts_error("weird failure\nline2")
+        self.assertIn("weird failure", en)
+        self.assertNotIn("line2", en)
+
+    def test_tts_voices_and_models_constants(self):
+        self.assertIn("nova", bidar.TTS_VOICES)
+        self.assertEqual(len(bidar.TTS_VOICES), 9)
+        self.assertEqual(set(bidar.TTS_MODELS), {"tts-1", "tts-1-hd"})
+
+    def test_config_defaults_have_tts_keys(self):
+        self.assertEqual(bidar._DEFAULT_CONFIG["tts_voice"], "nova")
+        self.assertEqual(bidar._DEFAULT_CONFIG["tts_model"], "tts-1-hd")
+
+
+class TestTTSGenerate(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_returns_bytes(self):
+        class FakeTTS:
+            def __init__(self, api_key, **kw): pass
+            async def generate_speech(self, text, model, voice, response_format):
+                return b"OggS-fake-audio"
+
+        with patch.object(bidar, "_tts_ready", return_value=(True, "")), \
+             patch.object(bidar, "OpenAITextToSpeech", FakeTTS):
+            audio, err = await bidar._tts_generate("سلام", "nova", "tts-1-hd")
+        self.assertIsNone(err)
+        self.assertEqual(audio, b"OggS-fake-audio")
+
+    async def test_generate_not_ready(self):
+        with patch.object(bidar, "_tts_ready", return_value=(False, "no key")):
+            audio, err = await bidar._tts_generate("hi", "nova", "tts-1")
+        self.assertIsNone(audio)
+        self.assertEqual(err, "no key")
+
+    async def test_generate_exception_surfaced(self):
+        class FailTTS:
+            def __init__(self, api_key, **kw): pass
+            async def generate_speech(self, **kw):
+                raise RuntimeError("Budget has been exceeded!")
+
+        with patch.object(bidar, "_tts_ready", return_value=(True, "")), \
+             patch.object(bidar, "OpenAITextToSpeech", FailTTS):
+            audio, err = await bidar._tts_generate("hi", "nova", "tts-1")
+        self.assertIsNone(audio)
+        self.assertIn("budget", (err or "").lower())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

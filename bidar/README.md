@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.11.3-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.12.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -275,6 +275,23 @@ sudo systemctl enable --now bidar
 | `.ocr` | استخراج متن از عکس (روی یه عکس reply بزن) |
 | `.imgmodel <مدل>` | تغییر مدل (`gemini-2.5-flash-image`, `gemini-3-pro-image`) |
 | `.imgmodel` | نمایش مدل فعلی |
+
+</div>
+
+### 🔊 صدا — متن به گفتار (`.say`)
+
+<div dir="rtl">
+
+| دستور | کاربرد |
+|:---|:---|
+| `.say <متن>` | متن رو به یه ویس طبیعی تبدیل می‌کنه و می‌فرسته |
+| `.say` (روی یه پیام reply) | پیام ریپلای‌شده رو با صدا می‌خونه |
+| `.say -v onyx <متن>` | انتخاب صدا فقط برای همین ویس |
+| `.voice` | نمایش/لیست صداها و مدل فعلی |
+| `.voice <نام>` | تنظیم صدای پیش‌فرض (۹ صدا: `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`) |
+| `.voice model tts-1|tts-1-hd` | تنظیم کیفیت (`tts-1` سریع / `tts-1-hd` کیفیت بالا) |
+
+> 🌍 فارسی، انگلیسی، عربی و بیش از ۵۰ زبان رو خودکار تشخیص می‌ده. با کلید Emergent کار می‌کنه (بدون API جدا). خروجی به‌صورت ویس واقعی تلگرام (ogg-opus) ارسال می‌شه.
 
 </div>
 
