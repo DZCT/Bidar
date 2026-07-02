@@ -125,6 +125,17 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.11.3 — Full-Project Code Review & Bug-Fix Release (Completed Jun 2026)
+User asked for a careful full-project review + fixes. 6 bugs fixed, all verified by testing agent (151/151 tests green):
+- ✅ **GitHub `.tldr` parse bug**: `repo.rstrip(".git")` mangled repo names ending in t/i/g/. (`audit`→`aud`, `chat`→`cha`). New `_parse_github_repo()` helper strips only a real `.git` suffix.
+- ✅ **Hang risk**: thumbnail download used `urllib.request.urlretrieve` (no timeout — could hang a music download forever). Now `urlopen(timeout=15)` + 5MB read cap.
+- ✅ **Whitelist crash**: `_is_chat_allowed`/`_whitelist_contains`/`_whitelist_without` raised ValueError on hand-edited/garbage config entries. New `_to_int()` skips bad values gracefully.
+- ✅ **Music auto-detect self-trigger**: `_BOT_MSG_PREFIXES` extended with 🔍🔒🎨🖼👴🧒📰🌐📦▶️📊📖 so the bot never re-downloads music links inside its own captions/summaries.
+- ✅ **Log rotation**: `bidar.log` grew unbounded on VPS → `RotatingFileHandler` (5MB × 2 backups).
+- ✅ **Dead code & stale docs**: removed unused `_sc_download_and_send`; `.env.example` no longer advertises a nonexistent `.update` Telegram command / `renderer.py` / unused `BIDAR_UPDATE_URL`.
+- ✅ Tests: **129 passing** in project suite (+8 new: TestGithubRepoParse, TestWhitelistRobustness, TestBotMsgPrefixes) + 22 independent verification tests by testing agent (`tests/test_bug_fixes_verification.py`) = **151 total**.
+- ✅ Verified healthy: `.help` text length (en 2941 / fa 2802 chars — under Telegram 4096 limit), systemd `Restart=always` covers `.restart`, i18n dict complete (every key has en+fa), install.sh/update.sh consistent.
+
 ### v1.10.0 — `.tldr` Link Summariser (Completed Jun 2026)
 New command: AI-powered TL;DR for any URL — news articles, blog posts, GitHub repos, YouTube, generic web pages.
 - ✅ `_extract_urls()` — regex extraction, dedup, balanced-parentheses aware (Wikipedia URLs like `Python_(programming_language)` survive intact)
@@ -226,8 +237,8 @@ bash <(curl -fsSL -H "Authorization: token $GH_TOKEN" \
 ✅ Whitelist variants: raw `.id` style `2453861964` matches chat `-1002453861964`
 
 ## Next Action Items
-- User: "Save to GitHub" then `bash update.sh` on VPS to deploy v1.9.2
-- User verify in Telegram: Tidal / Apple Music / YouTube Music links in PV & allowed groups
+- User: "Save to GitHub" then `bash update.sh` on VPS to deploy v1.11.3
+- User pick next feature from proposed list (35 proposals sent — voicetext/video/remind/summary top picks)
 
 ## Backlog (Prioritized)
 ### P1
