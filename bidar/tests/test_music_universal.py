@@ -1307,5 +1307,82 @@ class TestImageGenReturnsError(unittest.IsolatedAsyncioTestCase):
         self.assertIn("budget", (err or "").lower())
 
 
+# ────────────────────────────────────────────────────────────────────
+# GitHub repo URL parsing (.tldr) — `.git` suffix must be stripped safely
+# ────────────────────────────────────────────────────────────────────
+class TestGithubRepoParse(unittest.TestCase):
+    def test_repo_names_ending_in_git_chars_are_preserved(self):
+        for url, expected in [
+            ("https://github.com/user/audit", ("user", "audit")),
+            ("https://github.com/user/chat", ("user", "chat")),
+            ("https://github.com/user/tig", ("user", "tig")),
+            ("https://github.com/user/config.", ("user", "config.")),
+        ]:
+            self.assertEqual(bidar._parse_github_repo(url), expected, url)
+
+    def test_git_suffix_stripped(self):
+        self.assertEqual(bidar._parse_github_repo("https://github.com/user/repo.git"),
+                         ("user", "repo"))
+        self.assertEqual(bidar._parse_github_repo("https://github.com/user/tig.git"),
+                         ("user", "tig"))
+
+    def test_query_and_www_handled(self):
+        self.assertEqual(
+            bidar._parse_github_repo("https://www.github.com/User/My-Repo?tab=readme"),
+            ("User", "My-Repo"))
+
+    def test_non_github_returns_none(self):
+        self.assertIsNone(bidar._parse_github_repo("https://gitlab.com/a/b"))
+        self.assertIsNone(bidar._parse_github_repo("https://github.com/onlyowner"))
+
+
+# ────────────────────────────────────────────────────────────────────
+# Whitelist robustness — malformed config entries must never crash
+# ────────────────────────────────────────────────────────────────────
+class TestWhitelistRobustness(unittest.TestCase):
+    def setUp(self):
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+
+    def test_garbage_entries_do_not_crash(self):
+        garbage = ["oops", None, "12.5", -1001234567890]
+        bidar.config["allowed_groups"] = garbage
+        self.assertTrue(bidar._is_chat_allowed(-1001234567890))
+        self.assertTrue(bidar._is_chat_allowed(1234567890))
+        self.assertFalse(bidar._is_chat_allowed(-999))
+        self.assertTrue(bidar._whitelist_contains(1234567890, garbage))
+        left = bidar._whitelist_without(-1001234567890, garbage)
+        self.assertNotIn(-1001234567890, left)
+
+    def test_numeric_strings_still_match(self):
+        bidar.config["allowed_groups"] = ["-1001234567890"]
+        self.assertTrue(bidar._is_chat_allowed(1234567890))
+
+
+# ────────────────────────────────────────────────────────────────────
+# Outgoing bot-message prefixes — bot's own captions must be ignored
+# by the music auto-detect outgoing handler
+# ────────────────────────────────────────────────────────────────────
+class TestBotMsgPrefixes(unittest.TestCase):
+    def test_bot_generated_messages_are_excluded(self):
+        samples = [
+            "🎵 **Song**\n👤 Artist\n☁️ SoundCloud",
+            '🔍 Search: "https://music.youtube.com/watch?v=x"',
+            "🔒 Restricted Search: \"query\"",
+            "📰 **TL;DR** of https://example.com",
+            "🎨 a prompt with https://music.youtube.com/watch?v=x",
+            "▶️ [title](https://music.youtube.com/watch?v=x)",
+            "🖼 **Edited:** prompt",
+            "👴 Aged: **+20 years**",
+            "🧒 Cartoon: **pixar**",
+        ]
+        for msg in samples:
+            self.assertTrue(msg.startswith(bidar._BOT_MSG_PREFIXES), msg)
+
+    def test_normal_owner_message_not_excluded(self):
+        self.assertFalse(
+            "check this https://music.youtube.com/watch?v=x".startswith(
+                bidar._BOT_MSG_PREFIXES))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -24,6 +24,7 @@ import copy
 import html
 import json
 import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -66,7 +67,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.11.2"
+VERSION = "1.11.3"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -160,7 +161,10 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)s | %(message)s",
     level=logging.INFO,
     handlers=[
-        logging.FileHandler(BASE_DIR / "bidar.log", encoding="utf-8"),
+        logging.handlers.RotatingFileHandler(
+            BASE_DIR / "bidar.log", encoding="utf-8",
+            maxBytes=5 * 1024 * 1024, backupCount=2,
+        ),
         logging.StreamHandler(),
     ],
 )
@@ -907,12 +911,20 @@ def _fetch_page_text(url: str, max_chars: int = 6000) -> dict:
     }
 
 
-def _fetch_github_repo(url: str) -> dict | None:
-    """Fetch GitHub repo metadata + README via the public API (no auth needed)."""
+def _parse_github_repo(url: str) -> tuple[str, str] | None:
+    """Extract (owner, repo) from a GitHub URL. Strips a `.git` suffix safely."""
     m = re.search(r"//(?:www\.)?github\.com/([^/]+)/([^/?#]+)", url, re.I)
     if not m:
         return None
-    owner, repo = m.group(1), m.group(2).rstrip(".git")
+    return m.group(1), re.sub(r"\.git$", "", m.group(2))
+
+
+def _fetch_github_repo(url: str) -> dict | None:
+    """Fetch GitHub repo metadata + README via the public API (no auth needed)."""
+    parsed = _parse_github_repo(url)
+    if not parsed:
+        return None
+    owner, repo = parsed
     try:
         meta = _http_json(f"https://api.github.com/repos/{owner}/{repo}", timeout=20)
     except Exception as e:  # noqa: BLE001
@@ -1450,23 +1462,30 @@ def _chat_id_variants(cid) -> set[int]:
     return variants
 
 
+def _to_int(x) -> int | None:
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def _is_chat_allowed(chat_id) -> bool:
     """True if `chat_id` (in any representation) is in the allowed_groups whitelist."""
     allowed = config.get("allowed_groups", []) or []
     if not allowed:
         return False
     variants = _chat_id_variants(chat_id)
-    return any(int(a) in variants for a in allowed)
+    return any(_to_int(a) in variants for a in allowed)
 
 
 def _whitelist_contains(cid, lst) -> bool:
     variants = _chat_id_variants(cid)
-    return any(int(x) in variants for x in lst)
+    return any(_to_int(x) in variants for x in lst)
 
 
 def _whitelist_without(cid, lst) -> list:
     variants = _chat_id_variants(cid)
-    return [x for x in lst if int(x) not in variants]
+    return [x for x in lst if _to_int(x) not in variants]
 
 
 def _fmt_duration(seconds) -> str:
@@ -1800,7 +1819,9 @@ def _music_download_sync(target: str, tmpdir: str) -> dict | None:
     if thumb_url.split("?")[0].lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
         try:
             thumb_path = os.path.join(tmpdir, "cover.jpg")
-            urllib.request.urlretrieve(thumb_url, thumb_path)
+            req = urllib.request.Request(thumb_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp, open(thumb_path, "wb") as f:
+                f.write(resp.read(5_000_000))
         except Exception:  # noqa: BLE001
             thumb_path = None
     return {
@@ -1976,11 +1997,6 @@ async def _music_download_and_send(event, url: str, platform: str, is_drm: bool,
     finally:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-# Backwards-compatible alias: existing call sites still use _sc_download_and_send
-async def _sc_download_and_send(event, url: str) -> None:
-    await _music_download_and_send(event, url, "soundcloud", False)
 
 
 # ────────── Search Helpers ──────────
@@ -3559,7 +3575,12 @@ async def handle_incoming(event):
 
 # Status/system messages the bot itself sends start with one of these markers —
 # the outgoing music handler must never re-process them.
-_BOT_MSG_PREFIXES = ("🎵", "🔎", "📤", "❌", "✅", "⚠️", "ℹ️", "📋")
+_BOT_MSG_PREFIXES = (
+    "🎵", "🔎", "📤", "❌", "✅", "⚠️", "ℹ️", "📋",
+    # Captions / fresh messages sent by other features (search, image tools,
+    # tldr, sum, ocr) — may themselves contain music URLs and must be ignored.
+    "🔍", "🔒", "🎨", "🖼", "👴", "🧒", "📰", "🌐", "📦", "▶️", "📊", "📖",
+)
 
 
 @client.on(events.NewMessage(outgoing=True))
