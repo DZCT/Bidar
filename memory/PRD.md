@@ -125,6 +125,12 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.13.1 — Fix: image commands not deleting the processing message (Completed Jun 2026)
+User reported that for `.img` / `.imgedit` (and `.style` / `.aged` / `.cartoon`) the initial "🎨 processing..." status message stayed behind after the image was sent.
+- 🐛 **Root cause**: in `cmd_image`, `cmd_imgedit`, and `_do_image_transform`, `await msg.delete()` sat INSIDE the same `try/except` as `client.send_file(...)`. If the send succeeded but `delete()` raised (transient error / FloodWait / delete restriction), the shared `except` treated it as a send failure — re-edited the message to `img_send_failed` and left the processing message in place.
+- ✅ **Fix**: moved `msg.delete()` OUT of the send `try/except` into its own guarded `try: ... except Exception: pass` block that runs only after a successful send; the send-failure `except` now carries an explicit `return`, and the `finally` still cleans the temp file. Now matches the pattern used by `.say` / `.up` / `.sc`.
+- ✅ Verified by testing_agent: **184/184 tests pass** (+5 new regression tests in `TestImageProcessingMessageDeleted`: happy-path delete, delete-failure does not mislabel send, imgedit/transform delete, genuine send failure still reported).
+
 ### v1.13.0 — `.up` URL Uploader (Completed Jun 2026)
 New feature: download a file from a direct link and re-upload it to Telegram, so the user doesn't have to download-then-forward manually.
 - ✅ `.up <link>` — stream-download + upload; `reply + .up` auto-detects the link in the replied message (reuses `_extract_urls`)
