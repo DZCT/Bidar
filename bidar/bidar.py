@@ -3051,16 +3051,22 @@ async def cmd_image(event):
             caption=f"🎨 {prompt[:1000]}",
             reply_to=event.reply_to_msg_id,
         )
-        await msg.delete()
     except Exception as e:  # noqa: BLE001
         log.error(f"Send image: {e}")
         await msg.edit(t("img_send_failed", e=str(e)))
+        return
     finally:
         if tmp:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+    # Image sent successfully — remove the processing message (guarded so a
+    # transient delete failure never leaves it behind or mislabels the send).
+    try:
+        await msg.delete()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}imgmodel(?:\s+(\S+))?$"))
@@ -3141,16 +3147,20 @@ async def cmd_imgedit(event):
             caption=t("imgedit_caption", p=prompt[:900]),
             reply_to=replied.id,
         )
-        await msg.delete()
     except Exception as e:  # noqa: BLE001
         log.error(f"Send edited image: {e}")
         await msg.edit(t("img_send_failed", e=str(e)))
+        return
     finally:
         if tmp:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+    try:
+        await msg.delete()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def _do_image_transform(event, edit_prompt: str, processing_label: str,
@@ -3193,16 +3203,20 @@ async def _do_image_transform(event, edit_prompt: str, processing_label: str,
             caption=caption_label,
             reply_to=replied.id,
         )
-        await msg.delete()
     except Exception as e:  # noqa: BLE001
         log.error(f"Send transformed image: {e}")
         await msg.edit(t("img_send_failed", e=str(e)))
+        return
     finally:
         if tmp:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+    try:
+        await msg.delete()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ═════════ Image transformations (.style / .aged / .cartoon) ═════════

@@ -1586,5 +1586,93 @@ class TestUploaderDownload(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(f.read(), data)
 
 
+# ────────────────────────────────────────────────────────────────────
+# Image commands: the processing message must be deleted after a successful
+# send, and a delete failure must NOT mislabel the send as failed.
+# ────────────────────────────────────────────────────────────────────
+class TestImageProcessingMessageDeleted(unittest.IsolatedAsyncioTestCase):
+    def _make_event(self, is_reply=False):
+        status = MagicMock()
+        status.delete = AsyncMock()
+        status.edit = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999
+        ev.out = True
+        ev.chat_id = 55
+        ev.is_reply = is_reply
+        ev.reply_to_msg_id = None
+        ev.pattern_match.group.return_value = "a cute cat"
+        ev.edit = AsyncMock(return_value=status)
+        async def replied():
+            r = MagicMock(); r.media = True; r.id = 7
+            return r
+        ev.get_reply_message = AsyncMock(side_effect=replied)
+        return ev, status
+
+    async def test_cmd_image_deletes_processing_message(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._make_event()
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_generate_image",
+                          AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", None))):
+            mc.send_file = AsyncMock()
+            await bidar.cmd_image(ev)
+        status.delete.assert_awaited_once()
+        # Successful send must NOT relabel as failure
+        for call in status.edit.await_args_list:
+            self.assertNotIn("❌", str(call))
+
+    async def test_cmd_image_delete_failure_does_not_relabel_send(self):
+        """If msg.delete() raises after a successful send, the send must NOT be
+        reported as failed (regression: delete used to be inside the send try)."""
+        bidar.OWNER_ID = 999
+        ev, status = self._make_event()
+        status.delete = AsyncMock(side_effect=RuntimeError("cannot delete"))
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_generate_image",
+                          AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", None))):
+            mc.send_file = AsyncMock()
+            await bidar.cmd_image(ev)  # must not raise
+        mc.send_file.assert_awaited_once()
+        # The failure edit must never have been triggered by a delete error
+        for call in status.edit.await_args_list:
+            self.assertNotIn("img_send_failed", str(call))
+            self.assertNotIn("cannot delete", str(call))
+
+    async def test_cmd_imgedit_deletes_processing_message(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._make_event(is_reply=True)
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_edit_image",
+                          AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", None))):
+            mc.send_file = AsyncMock()
+            mc.download_media = AsyncMock(return_value=b"\xff\xd8\xff\xe0jpeg")
+            await bidar.cmd_imgedit(ev)
+        status.delete.assert_awaited_once()
+
+    async def test_do_image_transform_deletes_processing_message(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._make_event(is_reply=True)
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_edit_image",
+                          AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", None))):
+            mc.send_file = AsyncMock()
+            mc.download_media = AsyncMock(return_value=b"\xff\xd8\xff\xe0jpeg")
+            await bidar._do_image_transform(ev, "make it anime", "processing", "done")
+        status.delete.assert_awaited_once()
+
+    async def test_cmd_image_send_failure_is_reported(self):
+        """A genuine send_file failure must still surface an error to the user."""
+        bidar.OWNER_ID = 999
+        ev, status = self._make_event()
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_generate_image",
+                          AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nfake", None))):
+            mc.send_file = AsyncMock(side_effect=RuntimeError("network down"))
+            await bidar.cmd_image(ev)
+        status.delete.assert_not_awaited()
+        self.assertTrue(status.edit.await_count >= 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
