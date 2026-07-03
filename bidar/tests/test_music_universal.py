@@ -1481,5 +1481,110 @@ class TestTTSGenerate(unittest.IsolatedAsyncioTestCase):
         self.assertIn("budget", (err or "").lower())
 
 
+# ────────────────────────────────────────────────────────────────────
+# URL Uploader (.up)
+# ────────────────────────────────────────────────────────────────────
+class TestUploaderHelpers(unittest.TestCase):
+    def test_human_size(self):
+        self.assertEqual(bidar._human_size(0), "0 B")
+        self.assertEqual(bidar._human_size(512), "512 B")
+        self.assertEqual(bidar._human_size(1024), "1.0 KB")
+        self.assertEqual(bidar._human_size(1536), "1.5 KB")
+        self.assertEqual(bidar._human_size(5 * 1024 * 1024), "5.0 MB")
+        self.assertEqual(bidar._human_size(2 * 1024**3), "2.0 GB")
+
+    def test_progress_bar(self):
+        self.assertEqual(bidar._progress_bar(0), "░" * 10)
+        self.assertEqual(bidar._progress_bar(100), "█" * 10)
+        self.assertEqual(bidar._progress_bar(40), "████░░░░░░")
+        # clamps out-of-range
+        self.assertEqual(bidar._progress_bar(150), "█" * 10)
+        self.assertEqual(bidar._progress_bar(-5), "░" * 10)
+
+    def test_guess_filename_from_content_disposition(self):
+        headers = {"Content-Disposition": 'attachment; filename="report final.pdf"'}
+        self.assertEqual(
+            bidar._guess_upload_filename("https://x.com/a?b=1", headers), "report final.pdf")
+
+    def test_guess_filename_from_url_path(self):
+        self.assertEqual(
+            bidar._guess_upload_filename("https://x.com/files/song.mp3", {}), "song.mp3")
+
+    def test_guess_filename_utf8_encoded(self):
+        headers = {"Content-Disposition": "attachment; filename*=UTF-8''%D9%81%D8%A7%DB%8C%D9%84.zip"}
+        self.assertEqual(bidar._guess_upload_filename("https://x.com/d", headers), "فایل.zip")
+
+    def test_guess_filename_sanitizes_and_falls_back(self):
+        # no path, no header → 'file' + ext from mime
+        name = bidar._guess_upload_filename("https://x.com/", {}, "image/png")
+        self.assertEqual(name, "file.png")
+
+    def test_guess_filename_strips_dangerous_chars(self):
+        headers = {"Content-Disposition": 'filename="a/b\\c:d.txt"'}
+        got = bidar._guess_upload_filename("https://x.com/d", headers)
+        self.assertNotIn("/", got)
+        self.assertNotIn("\\", got)
+        self.assertTrue(got.endswith(".txt"))
+
+    def test_categorize_upload(self):
+        self.assertEqual(bidar._categorize_upload("pic.JPG", ""), "image")
+        self.assertEqual(bidar._categorize_upload("clip.mp4", ""), "video")
+        self.assertEqual(bidar._categorize_upload("track.flac", ""), "audio")
+        self.assertEqual(bidar._categorize_upload("archive.zip", ""), "document")
+        # mime-based when extension is unknown
+        self.assertEqual(bidar._categorize_upload("noext", "video/webm"), "video")
+        self.assertEqual(bidar._categorize_upload("noext", "application/pdf"), "document")
+
+    def test_build_caption_contains_details(self):
+        info = {"name": "movie.mp4", "size": 5 * 1024 * 1024,
+                "mime": "video/mp4", "url": "https://cdn.example.com/movie.mp4"}
+        cap = bidar._build_upload_caption(info, "video")
+        self.assertIn("movie.mp4", cap)
+        self.assertIn("video/mp4", cap)
+        self.assertIn("5.0 MB", cap)
+        self.assertIn("cdn.example.com", cap)
+        self.assertTrue(cap.startswith("🎬"))
+
+    def test_max_upload_size_is_2gb(self):
+        self.assertEqual(bidar.MAX_UPLOAD_SIZE, 2 * 1024 * 1024 * 1024)
+
+    def test_uploader_icons_in_bot_prefixes(self):
+        # Uploader caption icons must be skipped by the outgoing music auto-detect handler
+        for icon in ("📥", "🎬", "📄", "🖼", "🎵"):
+            self.assertTrue((icon + " caption text").startswith(bidar._BOT_MSG_PREFIXES), icon)
+
+
+class TestUploaderDownload(unittest.IsolatedAsyncioTestCase):
+    async def test_download_rejects_oversized_via_content_length(self):
+        fake_resp = MagicMock()
+        fake_resp.headers = {"Content-Length": str(3 * 1024**3), "Content-Type": "application/zip"}
+        fake_resp.close = MagicMock()
+        status = MagicMock(); status.edit = AsyncMock()
+        with patch.object(bidar.urllib.request, "urlopen", return_value=fake_resp):
+            info, err = await bidar._download_url_file(
+                "https://x.com/big.zip", tempfile.mkdtemp(), status)
+        self.assertIsNone(info)
+        self.assertIn("2.0 GB", err)
+
+    async def test_download_streams_small_file(self):
+        import io
+        data = b"HELLO-FILE-CONTENT" * 10
+        stream = io.BytesIO(data)
+        fake_resp = MagicMock()
+        fake_resp.headers = {"Content-Length": str(len(data)), "Content-Type": "text/plain"}
+        fake_resp.read = stream.read
+        fake_resp.close = MagicMock()
+        status = MagicMock(); status.edit = AsyncMock()
+        tmp = tempfile.mkdtemp()
+        with patch.object(bidar.urllib.request, "urlopen", return_value=fake_resp):
+            info, err = await bidar._download_url_file(
+                "https://x.com/hello.txt", tmp, status)
+        self.assertIsNone(err)
+        self.assertEqual(info["name"], "hello.txt")
+        self.assertEqual(info["size"], len(data))
+        with open(info["path"], "rb") as f:
+            self.assertEqual(f.read(), data)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

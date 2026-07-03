@@ -25,6 +25,7 @@ import html
 import json
 import logging
 import logging.handlers
+import mimetypes
 import os
 import re
 import shutil
@@ -75,7 +76,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.12.0"
+VERSION = "1.13.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -452,6 +453,36 @@ I18N = {
         "fa": "⚠️ مدل باید `tts-1` (سریع) یا `tts-1-hd` (کیفیت بالا) باشه.\nمثال: `{p}voice model tts-1-hd`",
     },
 
+    # URL Uploader (.up)
+    "up_usage": {
+        "en": "📥 **URL Uploader**\n\n  `{p}up <link>` — download a file from a direct link and upload it here\n  reply + `{p}up` — auto-detect the link in the replied message\n\nℹ️ Images / videos / audio are sent as media, everything else as a file.\n💾 Max size: 2 GB.",
+        "fa": "📥 **آپلودر لینک**\n\n  `{p}up <لینک>` — فایل رو از یه لینک مستقیم دانلود و همین‌جا آپلود می‌کنه\n  ریپلای + `{p}up` — تشخیص خودکار لینک از پیام ریپلای‌شده\n\nℹ️ عکس/ویدیو/صوت به‌صورت مدیا، بقیه به‌صورت فایل ارسال می‌شن.\n💾 حداکثر حجم: ۲ گیگابایت.",
+    },
+    "up_no_url": {
+        "en": "⚠️ No direct link found. Send a URL after the command or reply to a message containing a link.",
+        "fa": "⚠️ لینک مستقیمی پیدا نشد. بعد از دستور لینک بفرست، یا روی پیامی که لینک داره ریپلای بزن.",
+    },
+    "up_starting": {"en": "📥 Fetching...\n_{u}_", "fa": "📥 در حال دریافت...\n_{u}_"},
+    "up_downloading": {"en": "📥 Downloading... `{done}`", "fa": "📥 در حال دانلود... `{done}`"},
+    "up_downloading_pct": {
+        "en": "📥 Downloading...\n`{bar}` {pct}%\n`{done}` / `{total}`",
+        "fa": "📥 در حال دانلود...\n`{bar}` {pct}%\n`{done}` / `{total}`",
+    },
+    "up_uploading": {"en": "📤 Uploading: _{name}_ ...", "fa": "📤 در حال آپلود: _{name}_ ..."},
+    "up_uploading_pct": {
+        "en": "📤 Uploading...\n`{bar}` {pct}%\n`{done}` / `{total}`",
+        "fa": "📤 در حال آپلود...\n`{bar}` {pct}%\n`{done}` / `{total}`",
+    },
+    "up_too_big": {
+        "en": "⚠️ File is too large (`{size}`). Max allowed is `{max}`.",
+        "fa": "⚠️ حجم فایل زیاده (`{size}`). حداکثر مجاز `{max}` است.",
+    },
+    "up_failed": {"en": "❌ Upload failed: `{e}`", "fa": "❌ آپلود ناموفق بود: `{e}`"},
+    "up_caption": {
+        "en": "{icon} **File Uploaded**\n━━━━━━━━━━━━━━━━\n📄 **Name:** `{name}`\n🏷 **Type:** `{type}`\n💾 **Size:** `{size}`\n🌐 **Source:** `{src}`",
+        "fa": "{icon} **فایل آپلود شد**\n━━━━━━━━━━━━━━━━\n📄 **نام:** `{name}`\n🏷 **نوع:** `{type}`\n💾 **حجم:** `{size}`\n🌐 **منبع:** `{src}`",
+    },
+
     # Bot language
     "botlang_show": {
         "en": "🌍 **Bot UI Language:** `{l}`\n\n🛠 To change:\n  `{p}botlang en` — English (default)\n  `{p}botlang fa` — Persian\n\nℹ️ This only changes the bot's UI messages (help, status, errors). Auto-reply, AI responses, and translation work independently.",
@@ -639,7 +670,9 @@ I18N = {
             "  `{p}imgsize [ratio]` — view/set default aspect ratio\n\n"
             "📰 **Web**\n"
             "  `{p}tldr <url>` — summarise a link (always in Persian)\n"
-            "  reply + `{p}tldr` — auto-detect URLs in replied message\n\n"
+            "  reply + `{p}tldr` — auto-detect URLs in replied message\n"
+            "  `{p}up <link>` — download a file from a link & upload it here\n"
+            "     reply + `{p}up` — auto-detect the link in the replied message\n\n"
             "🔊 **Voice (Text-to-Speech)**\n"
             "  `{p}say <text>` — send text as a natural voice message\n"
             "     reply + `{p}say` — speak the replied message\n"
@@ -713,7 +746,9 @@ I18N = {
             "  `{p}imgsize [ابعاد]` — نمایش/تنظیم ابعاد پیش‌فرض\n\n"
             "📰 **وب**\n"
             "  `{p}tldr <لینک>` — خلاصه‌سازی لینک (همیشه فارسی)\n"
-            "  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n\n"
+            "  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n"
+            "  `{p}up <لینک>` — دانلود فایل از یه لینک و آپلودش همین‌جا\n"
+            "     ریپلای + `{p}up` — تشخیص خودکار لینک از پیام ریپلای‌شده\n\n"
             "🔊 **صدا (متن به گفتار)**\n"
             "  `{p}say <متن>` — متن رو به صورت ویس طبیعی می‌فرسته\n"
             "     ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n"
@@ -1516,6 +1551,156 @@ async def _tts_generate(text: str, voice: str, model: str,
     except Exception as e:  # noqa: BLE001
         log.error(f"TTS error: {e}")
         return None, str(e)
+
+
+# ────────── URL Uploader (.up) helpers ──────────
+MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB (normal Telegram account limit)
+
+_UP_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "heic"}
+_UP_VIDEO_EXTS = {"mp4", "mkv", "mov", "webm", "avi", "m4v", "mpg", "mpeg", "wmv", "flv"}
+_UP_AUDIO_EXTS = {"mp3", "m4a", "ogg", "oga", "opus", "flac", "wav", "aac", "wma"}
+
+
+def _human_size(n) -> str:
+    """Human-readable byte size, e.g. 12.4 MB."""
+    size = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _progress_bar(pct) -> str:
+    """10-segment progress bar string."""
+    pct = max(0, min(100, int(pct)))
+    filled = pct // 10
+    return "█" * filled + "░" * (10 - filled)
+
+
+def _guess_upload_filename(url: str, headers, mime: str = "") -> str:
+    """Best-effort filename from Content-Disposition → URL path → mime fallback."""
+    name = ""
+    cd = ""
+    try:
+        cd = headers.get("Content-Disposition") or ""
+    except Exception:  # noqa: BLE001
+        cd = ""
+    if cd:
+        m = re.search(r"filename\*=(?:UTF-8'')?([^;\n]+)", cd, re.I) or \
+            re.search(r'filename="?([^";\n]+)"?', cd, re.I)
+        if m:
+            name = urllib.parse.unquote(m.group(1).strip().strip('"'))
+    if not name:
+        path = urllib.parse.urlparse(url).path
+        name = urllib.parse.unquote(os.path.basename(path))
+    name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip().strip(".")
+    if not name:
+        name = "file"
+    # Append an extension from the mime type when the name has none
+    if "." not in name and mime:
+        ext = mimetypes.guess_extension(mime.split(";")[0].strip())
+        if ext:
+            name += ext
+    return name[:200]
+
+
+def _categorize_upload(name: str, mime: str) -> str:
+    """Return 'image' / 'video' / 'audio' / 'document' for smart sending."""
+    ext = os.path.splitext(name)[1].lower().lstrip(".")
+    mime = (mime or "").lower()
+    if ext in _UP_IMAGE_EXTS or mime.startswith("image/"):
+        return "image"
+    if ext in _UP_VIDEO_EXTS or mime.startswith("video/"):
+        return "video"
+    if ext in _UP_AUDIO_EXTS or mime.startswith("audio/"):
+        return "audio"
+    return "document"
+
+
+def _build_upload_caption(info: dict, category: str) -> str:
+    icon = {"image": "🖼", "video": "🎬", "audio": "🎵", "document": "📄"}.get(category, "📦")
+    domain = urllib.parse.urlparse(info.get("url", "")).netloc or "—"
+    return t("up_caption",
+             icon=icon,
+             name=info["name"],
+             type=(info.get("mime") or category),
+             size=_human_size(info["size"]),
+             src=domain)
+
+
+async def _safe_edit(msg, text) -> None:
+    try:
+        await msg.edit(text)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _download_url_file(url: str, tmpdir: str, status) -> tuple[dict | None, str | None]:
+    """Stream-download `url` to `tmpdir`, enforcing MAX_UPLOAD_SIZE, with periodic
+    progress edits on `status`. Returns (info_dict, error_msg)."""
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0 Safari/537.36"),
+        "Accept": "*/*",
+    })
+    try:
+        resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=30)
+    except Exception as e:  # noqa: BLE001
+        return None, t("up_failed", e=str(e)[:200])
+
+    try:
+        clen = int(resp.headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        clen = 0
+    if clen and clen > MAX_UPLOAD_SIZE:
+        try:
+            resp.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return None, t("up_too_big", size=_human_size(clen), max=_human_size(MAX_UPLOAD_SIZE))
+
+    mime = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
+    filename = _guess_upload_filename(url, resp.headers, mime)
+    path = os.path.join(tmpdir, filename)
+
+    downloaded = 0
+    last_edit = 0.0
+    chunk_size = 1024 * 1024  # 1 MB
+    try:
+        with open(path, "wb") as f:
+            while True:
+                chunk = await asyncio.to_thread(resp.read, chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if downloaded > MAX_UPLOAD_SIZE:
+                    return None, t("up_too_big", size="> 2 GB", max=_human_size(MAX_UPLOAD_SIZE))
+                now = time.time()
+                if now - last_edit >= 3:
+                    last_edit = now
+                    if clen:
+                        pct = downloaded * 100 // clen
+                        await _safe_edit(status, t("up_downloading_pct",
+                                                   bar=_progress_bar(pct), pct=pct,
+                                                   done=_human_size(downloaded),
+                                                   total=_human_size(clen)))
+                    else:
+                        await _safe_edit(status, t("up_downloading",
+                                                   done=_human_size(downloaded)))
+    except Exception as e:  # noqa: BLE001
+        return None, t("up_failed", e=str(e)[:200])
+    finally:
+        try:
+            resp.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if downloaded == 0:
+        return None, t("up_failed", e="empty response (0 bytes)")
+    return {"path": path, "name": filename, "size": downloaded, "mime": mime, "url": url}, None
 
 
 # ────────── Music Helpers (Universal Downloader) ──────────
@@ -3315,6 +3500,73 @@ async def cmd_voice(event):
     await event.edit(t("voice_set", v=v))
 
 
+# ═════════ URL Uploader (.up) ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}up(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_upload(event):
+    """Download a file from a direct URL and upload it to the current chat."""
+    arg = (event.pattern_match.group(1) or "").strip()
+    urls = _extract_urls(arg)
+    replied = None
+    if not urls and event.is_reply:
+        try:
+            replied = await event.get_reply_message()
+            if replied and (replied.raw_text or ""):
+                urls = _extract_urls(replied.raw_text)
+        except Exception:  # noqa: BLE001
+            replied = None
+    if not urls:
+        if not arg and not event.is_reply:
+            await event.edit(t("up_usage", p=CMD_PREFIX))
+        else:
+            await event.edit(t("up_no_url"))
+        return
+
+    url = urls[0]
+    reply_to = (replied.id if replied else event.reply_to_msg_id)
+    status = await event.edit(t("up_starting", u=url[:100]))
+    tmpdir = tempfile.mkdtemp(prefix="bidar_up_")
+    try:
+        info, derr = await _download_url_file(url, tmpdir, status)
+        if not info:
+            await _safe_edit(status, derr or t("up_failed", e="download failed"))
+            return
+
+        category = _categorize_upload(info["name"], info["mime"])
+        await _safe_edit(status, t("up_uploading", name=info["name"][:60]))
+        caption = _build_upload_caption(info, category)
+
+        last_up = [0.0]
+
+        def up_prog(sent, total):
+            now = time.time()
+            if total and now - last_up[0] >= 3:
+                last_up[0] = now
+                pct = sent * 100 // total
+                asyncio.create_task(_safe_edit(status, t(
+                    "up_uploading_pct", bar=_progress_bar(pct), pct=pct,
+                    done=_human_size(sent), total=_human_size(total))))
+
+        await client.send_file(
+            event.chat_id, info["path"],
+            caption=caption,
+            force_document=(category == "document"),
+            supports_streaming=(category == "video"),
+            reply_to=reply_to,
+            progress_callback=up_prog,
+        )
+        try:
+            await status.delete()
+        except Exception:  # noqa: BLE001
+            pass
+        log.info(f"[.up] uploaded {info['name']} ({_human_size(info['size'])}, {category}) from {url[:80]}")
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.up] failed: {e}")
+        await _safe_edit(status, t("up_failed", e=str(e)[:200]))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 # ═════════ TL;DR — Link summariser ═════════
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}tldr(?:\s+([\s\S]+))?$"))
 @owner_only
@@ -3829,8 +4081,9 @@ async def handle_incoming(event):
 _BOT_MSG_PREFIXES = (
     "🎵", "🔎", "📤", "❌", "✅", "⚠️", "ℹ️", "📋",
     # Captions / fresh messages sent by other features (search, image tools,
-    # tldr, sum, ocr) — may themselves contain music URLs and must be ignored.
+    # tldr, sum, ocr, uploader) — may themselves contain music URLs and must be ignored.
     "🔍", "🔒", "🎨", "🖼", "👴", "🧒", "📰", "🌐", "📦", "▶️", "📊", "📖",
+    "📥", "🎬", "📄",
 )
 
 

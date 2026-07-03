@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.12.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.13.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -292,6 +292,19 @@ sudo systemctl enable --now bidar
 | `.voice model tts-1|tts-1-hd` | تنظیم کیفیت (`tts-1` سریع / `tts-1-hd` کیفیت بالا) |
 
 > 🌍 فارسی، انگلیسی، عربی و بیش از ۵۰ زبان رو خودکار تشخیص می‌ده. با کلید Emergent کار می‌کنه (بدون API جدا). خروجی به‌صورت ویس واقعی تلگرام (ogg-opus) ارسال می‌شه.
+
+</div>
+
+### 📥 آپلودر لینک (`.up`)
+
+<div dir="rtl">
+
+| دستور | کاربرد |
+|:---|:---|
+| `.up <لینک>` | فایل رو از یه لینک مستقیم دانلود و همین‌جا آپلود می‌کنه |
+| `.up` (روی پیام دارای لینک reply) | لینک رو خودکار از پیام ریپلای‌شده پیدا می‌کنه |
+
+> 📦 ارسال هوشمند: عکس/ویدیو/صوت به‌صورت مدیا، بقیه به‌صورت فایل. زیر هر فایل یه کارت شیک با **نام، نوع، حجم و منبع** نوشته می‌شه. نوار پیشرفت دانلود/آپلود نمایش داده می‌شه. حداکثر حجم: **۲ گیگابایت**.
 
 </div>
 

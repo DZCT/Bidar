@@ -125,6 +125,19 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.13.0 — `.up` URL Uploader (Completed Jun 2026)
+New feature: download a file from a direct link and re-upload it to Telegram, so the user doesn't have to download-then-forward manually.
+- ✅ `.up <link>` — stream-download + upload; `reply + .up` auto-detects the link in the replied message (reuses `_extract_urls`)
+- ✅ **Smart send**: images/videos/audio → media (`force_document=False`, video `supports_streaming=True`); everything else → document
+- ✅ **Stylish caption card** under each file: 📄 Name · 🏷 Type (mime) · 💾 Size (human-readable) · 🌐 Source domain — bilingual
+- ✅ Filename resolution: `Content-Disposition` (incl. `filename*=UTF-8''` percent-encoded, e.g. Persian names) → URL path → mime-based fallback; dangerous chars sanitized
+- ✅ Streaming download in 1 MB chunks via `asyncio.to_thread` with live progress bar (10-segment) edited every 3s (download & upload)
+- ✅ **2 GB size cap** enforced from `Content-Length` header AND during streaming
+- ✅ Temp dir always cleaned up (`shutil.rmtree` in `finally`); uploader caption icons (📥🎬📄) added to `_BOT_MSG_PREFIXES` so the music auto-detect handler never re-processes them
+- ✅ Helpers: `_download_url_file`, `_guess_upload_filename`, `_categorize_upload`, `_build_upload_caption`, `_human_size`, `_progress_bar`, `_safe_edit`
+- ✅ Config: none (stateless). Help menu (en+fa) `📰 Web` section updated
+- ✅ Tests: **179 passing** (+13 uploader tests) + real E2E (downloaded httpbin PNG → sent as media with correct caption)
+
 ### v1.12.0 — `.say` Text-to-Speech (Voice Messages) (Completed Jun 2026)
 New feature: turn any text into a natural Telegram **voice message** via OpenAI TTS (Emergent Universal Key — no separate API key, no extra cost beyond key balance).
 - ✅ `.say <text>` — generate & send a voice message; `reply + .say` speaks the replied message
