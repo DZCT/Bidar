@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import base64
 import asyncio
 import tempfile
 import unittest
@@ -1672,6 +1673,143 @@ class TestImageProcessingMessageDeleted(unittest.IsolatedAsyncioTestCase):
             await bidar.cmd_image(ev)
         status.delete.assert_not_awaited()
         self.assertTrue(status.edit.await_count >= 1)
+
+
+# ────────────────────────────────────────────────────────────────────
+# Combine two images (.mix)
+# ────────────────────────────────────────────────────────────────────
+class TestMsgHasImage(unittest.TestCase):
+    def test_photo_message(self):
+        m = MagicMock(); m.photo = object(); m.document = None
+        self.assertTrue(bidar._msg_has_image(m))
+
+    def test_image_document(self):
+        m = MagicMock(); m.photo = None
+        m.document = MagicMock(); m.document.mime_type = "image/png"
+        self.assertTrue(bidar._msg_has_image(m))
+
+    def test_non_image_document(self):
+        m = MagicMock(); m.photo = None
+        m.document = MagicMock(); m.document.mime_type = "application/pdf"
+        self.assertFalse(bidar._msg_has_image(m))
+
+    def test_none(self):
+        self.assertFalse(bidar._msg_has_image(None))
+
+    def test_plain_text_message(self):
+        m = MagicMock(); m.photo = None; m.document = None
+        self.assertFalse(bidar._msg_has_image(m))
+
+
+class TestCombineImages(unittest.IsolatedAsyncioTestCase):
+    async def test_combine_returns_bytes(self):
+        class FakeChat:
+            def with_model(self, *a, **k): return self
+            def with_params(self, **k): return self
+            async def send_message_multimodal_response(self, msg):
+                return "ok", [{"data": base64.b64encode(b"\x89PNG\r\n\x1a\ncombined").decode()}]
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=FakeChat()), \
+             patch.object(bidar, "ImageContent", lambda b: b):
+            out, err = await bidar._combine_images(["aaa", "bbb"], "blend them")
+        self.assertIsNone(err)
+        self.assertEqual(out, b"\x89PNG\r\n\x1a\ncombined")
+
+    async def test_combine_needs_two_images(self):
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")):
+            out, err = await bidar._combine_images(["only-one"], "x")
+        self.assertIsNone(out)
+        self.assertIn("two", (err or "").lower())
+
+    async def test_combine_no_images_returned_is_safety(self):
+        class FakeChat:
+            def with_model(self, *a, **k): return self
+            def with_params(self, **k): return self
+            async def send_message_multimodal_response(self, msg):
+                return "text only", []
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=FakeChat()), \
+             patch.object(bidar, "ImageContent", lambda b: b):
+            out, err = await bidar._combine_images(["a", "b"], "x")
+        self.assertIsNone(out)
+        self.assertIn("no images returned", err)
+
+
+class TestCmdMixFlow(unittest.IsolatedAsyncioTestCase):
+    def _event(self, is_reply=True, own_image=False, caption=""):
+        status = MagicMock(); status.delete = AsyncMock(); status.edit = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999; ev.out = True; ev.chat_id = 55
+        ev.is_reply = is_reply; ev.reply_to_msg_id = (7 if is_reply else None)
+        ev.pattern_match.group.return_value = caption
+        ev.edit = AsyncMock(return_value=status)
+        # command message: has image only if own_image
+        ev.message = MagicMock()
+        ev.message.photo = object() if own_image else None
+        ev.message.document = None
+        return ev, status
+
+    async def test_needs_two_images(self):
+        """Reply to a single image, no attached image → prompts for two images."""
+        bidar.OWNER_ID = 999
+        ev, status = self._event(is_reply=True, own_image=False)
+        replied = MagicMock(); replied.photo = object(); replied.document = None
+        replied.grouped_id = None; replied.id = 7
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "client") as mc:
+            mc.download_media = AsyncMock(return_value=b"\xff\xd8\xff\xe0jpeg")
+            mc.send_file = AsyncMock()
+            ev.get_reply_message = AsyncMock(return_value=replied)
+            await bidar.cmd_mix(ev)
+        # Only 1 image gathered → must show the "need two" help, never call send_file
+        mc.send_file.assert_not_called()
+        self.assertTrue(any("mix" in str(c) or "🎭" in str(c)
+                            for c in [ev.edit.await_args_list, status.edit.await_args_list]))
+
+    async def test_reply_plus_attached_combines(self):
+        """Reply to image A + attach image B → combine and send, delete status."""
+        bidar.OWNER_ID = 999
+        ev, status = self._event(is_reply=True, own_image=True, caption="on a beach")
+        replied = MagicMock(); replied.photo = object(); replied.document = None
+        replied.grouped_id = None; replied.id = 7
+        sent = {}
+        async def fake_send_file(chat_id, path, **kw):
+            sent["caption"] = kw.get("caption"); sent["reply_to"] = kw.get("reply_to")
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "_combine_images",
+                          AsyncMock(return_value=(b"\x89PNG\r\n\x1a\nout", None))), \
+             patch.object(bidar, "client") as mc:
+            mc.download_media = AsyncMock(return_value=b"\xff\xd8\xff\xe0jpeg")
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            ev.get_reply_message = AsyncMock(return_value=replied)
+            await bidar.cmd_mix(ev)
+        mc.send_file.assert_awaited_once()
+        status.delete.assert_awaited_once()
+        self.assertIn("on a beach", sent["caption"])
+
+    async def test_reply_to_album_combines(self):
+        """Reply to a 2-photo album → both album images are used."""
+        bidar.OWNER_ID = 999
+        ev, status = self._event(is_reply=True, own_image=False)
+        a = MagicMock(); a.photo = object(); a.document = None; a.grouped_id = 111; a.id = 10
+        b = MagicMock(); b.photo = object(); b.document = None; b.grouped_id = 111; b.id = 11
+        replied = a
+        combine_calls = {}
+        async def fake_combine(imgs, prompt, aspect_ratio=None):
+            combine_calls["n"] = len(imgs); combine_calls["prompt"] = prompt
+            return b"\x89PNG\r\n\x1a\nout", None
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "_combine_images", side_effect=fake_combine), \
+             patch.object(bidar, "client") as mc:
+            ev.get_reply_message = AsyncMock(return_value=replied)
+            mc.get_messages = AsyncMock(return_value=[a, b])
+            mc.download_media = AsyncMock(return_value=b"\xff\xd8\xff\xe0jpeg")
+            mc.send_file = AsyncMock()
+            await bidar.cmd_mix(ev)
+        self.assertEqual(combine_calls["n"], 2)
+        # No prompt → default blend instruction
+        self.assertIn("blend", combine_calls["prompt"].lower())
+        mc.send_file.assert_awaited_once()
 
 
 if __name__ == "__main__":

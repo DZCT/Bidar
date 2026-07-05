@@ -125,6 +125,17 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.14.0 — `.mix` Combine Two Images (Completed Jun 2026)
+New feature (user request): merge/blend two images into one via Gemini Nano Banana — with an optional prompt.
+- ✅ `.mix [prompt]` (aliases `.combine` / `.merge`): if a prompt is given it guides the composition; without one, the two images are blended automatically
+- ✅ Two ways to supply images: (1) **reply** to one image + **attach** a second image to the `.mix` message; (2) **reply to an album** (two photos sent together — gathered via `get_messages` window filtered by `grouped_id`)
+- ✅ Optional aspect-ratio flag reused from `.img` (e.g. `.mix --16:9 ...`)
+- ✅ New `_combine_images()` passes **multiple `ImageContent`** to `send_message_multimodal_response` (live-verified: 2 refs in → 1 combined image out)
+- ✅ Helpers: `_msg_has_image`, `_gather_mix_images` (album + reply + own-attachment collection, capped at 2)
+- ✅ Reuses `_friendly_image_error` for safety-filter/budget errors; processing message deleted via the same guarded pattern as the v1.13.1 fix; caption icon 🎭 added to `_BOT_MSG_PREFIXES`
+- ✅ Bilingual i18n + help menu (`🎨 Image` section) + version 1.14.0
+- ✅ Tests: **195 passing** (+13: `TestMsgHasImage`, `TestCombineImages`, `TestCmdMixFlow`) + real E2E (2 httpbin images → 917 KB combined image, status message deleted)
+
 ### v1.13.1 — Fix: image commands not deleting the processing message (Completed Jun 2026)
 User reported that for `.img` / `.imgedit` (and `.style` / `.aged` / `.cartoon`) the initial "🎨 processing..." status message stayed behind after the image was sent.
 - 🐛 **Root cause**: in `cmd_image`, `cmd_imgedit`, and `_do_image_transform`, `await msg.delete()` sat INSIDE the same `try/except` as `client.send_file(...)`. If the send succeeded but `delete()` raised (transient error / FloodWait / delete restriction), the shared `except` treated it as a send failure — re-edited the message to `img_send_failed` and left the processing message in place.

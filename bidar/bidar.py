@@ -76,7 +76,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.13.1"
+VERSION = "1.14.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -359,6 +359,15 @@ I18N = {
         "fa": "❌ ویرایش تصویر ناموفق بود.\nاحتمالاً مدل نتونسته prompt رو پیاده کنه — متن ساده‌تر امتحان کن.",
     },
     "imgedit_caption": {"en": "🖼 **Edited:** {p}", "fa": "🖼 **ویرایش‌شده:** {p}"},
+
+    # .mix — combine two images
+    "mix_need_two": {
+        "en": "🎭 **Combine two images**\n\nProvide **two** images one of these ways:\n1. **Reply** to one image and **attach** a second image to your `{p}mix` message.\n2. **Reply** to an album (2 photos sent together) with `{p}mix`.\n\n📝 Optional prompt:\n  `{p}mix put them both on a beach at sunset`\n  `{p}mix --16:9 blend into a movie poster`\n\nWithout a prompt, the two images are blended automatically.",
+        "fa": "🎭 **ترکیب دو عکس**\n\nدو تا عکس رو یکی از این دو راه بده:\n۱. روی یه عکس **ریپلای** بزن و یه عکس دوم رو هم به پیام `{p}mix` **الصاق** کن.\n۲. روی یه آلبوم (دو عکسی که با هم فرستادی) با `{p}mix` ریپلای بزن.\n\n📝 پرامپت اختیاری:\n  `{p}mix هر دو رو کنار هم توی ساحل غروب بذار`\n  `{p}mix --16:9 به شکل پوستر فیلم ترکیبشون کن`\n\nبدون پرامپت، دو عکس خودکار با هم ترکیب می‌شن.",
+    },
+    "mix_processing": {"en": "🎭 Combining images...", "fa": "🎭 در حال ترکیب عکس‌ها..."},
+    "mix_caption": {"en": "🎭 **Combined:** {p}", "fa": "🎭 **ترکیب‌شده:** {p}"},
+    "mix_caption_default": {"en": "🎭 Combined image", "fa": "🎭 عکس ترکیب‌شده"},
 
     # .style / .aged / .cartoon
     "style_usage": {
@@ -660,6 +669,7 @@ I18N = {
             "  `{p}img <description>` — generate image (Nano Banana)\n"
             "     supports `--ar 16:9` / `--landscape` / `--portrait` flags\n"
             "  `{p}imgedit <change>` — edit image (reply to image)\n"
+            "  `{p}mix [prompt] — combine two images (reply to one + attach another, or reply to an album)`\n"
             "  `{p}style <style>` — re-render image in an artistic style (reply)\n"
             "     presets: vangogh, anime, ghibli, pixar, cyberpunk, watercolor, lego, ...\n"
             "     or any free-form description\n"
@@ -736,6 +746,7 @@ I18N = {
             "  `{p}img <توضیح>` — تولید تصویر با Nano Banana\n"
             "     قابل ترکیب با `--ar 16:9` / `--افقی` / `--استوری`\n"
             "  `{p}imgedit <توضیح>` — ویرایش عکس (روی عکس reply بزن)\n"
+            "  `{p}mix [پرامپت]` — ترکیب دو عکس (روی یکی reply بزن + دومی رو الصاق کن، یا روی آلبوم reply بزن)\n"
             "  `{p}style <سبک>` — تغییر سبک هنری عکس (روی عکس reply بزن)\n"
             "     سبک‌های آماده: انیمه، گیبلی، پیکسار، ون‌گوگ، آبرنگ، سایبرپانک، لگو، ...\n"
             "     یا هر توصیف آزاد دلخواه\n"
@@ -1413,6 +1424,39 @@ async def _edit_image(image_bytes: bytes, edit_prompt: str, aspect_ratio: str | 
         return base64.b64decode(images[0]["data"]), None
     except Exception as e:  # noqa: BLE001
         log.error(f"Image edit error: {e}")
+        return None, str(e)
+
+
+async def _combine_images(images_b64: list[str], prompt: str,
+                          aspect_ratio: str | None = None) -> tuple[bytes | None, str | None]:
+    """Combine/blend multiple reference images into one. Returns (bytes, error)."""
+    ready, ai_err = _ai_ready()
+    if not ready:
+        return None, ai_err or "AI not configured"
+    if len(images_b64) < 2:
+        return None, "need at least two images"
+    model_name = config.get("image_model", "gemini-3.1-flash-image-preview")
+    ar = aspect_ratio or config.get("image_aspect_ratio", "1:1")
+    try:
+        chat = (
+            LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"imgmix-{time.time_ns()}",
+                system_message="You are an expert image compositor. You blend and combine multiple reference images into a single, coherent, high-quality image.",
+            )
+            .with_model("gemini", model_name)
+            .with_params(modalities=["image", "text"],
+                         image_config={"aspect_ratio": ar})
+        )
+        contents = [ImageContent(b) for b in images_b64]
+        msg = UserMessage(text=prompt, file_contents=contents)
+        _text, images = await chat.send_message_multimodal_response(msg)
+        if not images:
+            log.warning("Image combine: no images returned (likely safety filter)")
+            return None, "no images returned (likely content blocked by safety filter)"
+        return base64.b64decode(images[0]["data"]), None
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Image combine error: {e}")
         return None, str(e)
 
 
@@ -3163,6 +3207,118 @@ async def cmd_imgedit(event):
         pass
 
 
+# ═════════ Combine two images (.mix / .combine / .merge) ═════════
+def _msg_has_image(m) -> bool:
+    """True if message `m` carries a photo or an image document."""
+    if m is None:
+        return False
+    if getattr(m, "photo", None):
+        return True
+    doc = getattr(m, "document", None)
+    if doc and (getattr(doc, "mime_type", "") or "").startswith("image/"):
+        return True
+    return False
+
+
+async def _gather_mix_images(event) -> tuple[list[bytes], str | None]:
+    """Collect up to 2 images for `.mix`: from a replied album, a replied single
+    image, and/or the command message's own attached image. Returns (images, err)."""
+    images: list[bytes] = []
+    try:
+        if event.is_reply:
+            replied = await event.get_reply_message()
+            if replied:
+                grp = getattr(replied, "grouped_id", None)
+                if grp:
+                    lo = max(1, replied.id - 9)
+                    window = await client.get_messages(
+                        event.chat_id, ids=list(range(lo, replied.id + 10)))
+                    album = sorted(
+                        [m for m in window
+                         if m and getattr(m, "grouped_id", None) == grp and _msg_has_image(m)],
+                        key=lambda m: m.id)
+                    for m in album:
+                        if len(images) >= 2:
+                            break
+                        b = await client.download_media(m, file=bytes)
+                        if isinstance(b, bytes) and b:
+                            images.append(b)
+                elif _msg_has_image(replied):
+                    b = await client.download_media(replied, file=bytes)
+                    if isinstance(b, bytes) and b:
+                        images.append(b)
+        if len(images) < 2 and _msg_has_image(event.message):
+            b = await client.download_media(event.message, file=bytes)
+            if isinstance(b, bytes) and b:
+                images.append(b)
+    except Exception as e:  # noqa: BLE001
+        return [], t("imgedit_dl_error", e=str(e))
+    return images, None
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}(?:mix|combine|merge)(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_mix(event):
+    """Combine two images into one. Optional prompt guides the composition."""
+    ready, err = _ai_ready()
+    if not ready:
+        await event.edit(t("ai_not_ready", err=err))
+        return
+    raw = (event.pattern_match.group(1) or "").strip()
+    ar_override, prompt = _extract_ar_flag(raw) if raw else (None, "")
+    prompt = prompt.strip()
+
+    images, gather_err = await _gather_mix_images(event)
+    if gather_err:
+        await event.edit(gather_err)
+        return
+    if len(images) < 2:
+        await event.edit(t("mix_need_two", p=CMD_PREFIX))
+        return
+    images = images[:2]
+
+    msg = await event.edit(t("mix_processing"))
+    if prompt:
+        instruction = (f"Using the provided reference images, {prompt}. "
+                       "Produce a single combined image.")
+    else:
+        instruction = ("Seamlessly combine and blend the provided images into a single "
+                       "cohesive image. Merge their subjects and scenes naturally with "
+                       "consistent lighting, perspective, color and art style.")
+    images_b64 = [base64.b64encode(b).decode("utf-8") for b in images]
+    out, gerr = await _combine_images(images_b64, instruction, aspect_ratio=ar_override)
+    if not out:
+        en, fa = _friendly_image_error(gerr or "")
+        await msg.edit(fa if config.get("bot_lang", "en") == "fa" else en)
+        return
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(out)
+            tmp = f.name
+        caption = t("mix_caption", p=prompt[:900]) if prompt else t("mix_caption_default")
+        await client.send_file(
+            event.chat_id, tmp,
+            caption=caption,
+            reply_to=event.reply_to_msg_id,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(f"Send mixed image: {e}")
+        await msg.edit(t("img_send_failed", e=str(e)))
+        return
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    try:
+        await msg.delete()
+    except Exception:  # noqa: BLE001
+        pass
+    log.info(f"[.mix] combined {len(images)} images (prompt={'yes' if prompt else 'no'})")
+
+
 async def _do_image_transform(event, edit_prompt: str, processing_label: str,
                                caption_label: str) -> None:
     """Shared flow for `.style` / `.aged` / `.cartoon`: pull replied image,
@@ -4097,7 +4253,7 @@ _BOT_MSG_PREFIXES = (
     # Captions / fresh messages sent by other features (search, image tools,
     # tldr, sum, ocr, uploader) — may themselves contain music URLs and must be ignored.
     "🔍", "🔒", "🎨", "🖼", "👴", "🧒", "📰", "🌐", "📦", "▶️", "📊", "📖",
-    "📥", "🎬", "📄",
+    "📥", "🎬", "📄", "🎭",
 )
 
 

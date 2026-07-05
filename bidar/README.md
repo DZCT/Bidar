@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.13.1-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.14.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -272,6 +272,7 @@ sudo systemctl enable --now bidar
 |:---|:---|
 | `.img <توضیح>` | تولید تصویر از روی متن |
 | `.imgedit <تغییر>` | ویرایش عکس (روی یه عکس reply بزن) |
+| `.mix [پرامپت]` | ترکیب دو عکس در یک عکس (روی یکی reply بزن + دومی رو الصاق کن، یا روی آلبوم reply بزن) |
 | `.ocr` | استخراج متن از عکس (روی یه عکس reply بزن) |
 | `.imgmodel <مدل>` | تغییر مدل (`gemini-2.5-flash-image`, `gemini-3-pro-image`) |
 | `.imgmodel` | نمایش مدل فعلی |
