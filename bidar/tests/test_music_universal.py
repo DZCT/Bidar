@@ -1999,21 +1999,36 @@ class TestServerStatus(unittest.TestCase):
 
     def test_format_en(self):
         s = bidar._format_server_status(self._fake_data(), "en")
-        self.assertIn("Server Status", s)
+        self.assertIn("Live Server Status", s)
+        self.assertIn("SERVER", s)
         self.assertIn("42%", s)
-        self.assertIn("4 cores", s)
+        self.assertIn("cores", s)
         self.assertIn("Python", s)
+        self.assertIn("```", s)  # wrapped in a monospace code block
 
     def test_format_fa(self):
         s = bidar._format_server_status(self._fake_data(), "fa")
-        self.assertIn("وضعیت سرور", s)
+        self.assertIn("وضعیت", s)
         self.assertIn("42%", s)
-        self.assertIn("هسته", s)
+        self.assertIn("```", s)
+
+    def test_format_lines_aligned(self):
+        """Every framed row must be the same visual width (aligned ASCII box)."""
+        s = bidar._format_server_status(self._fake_data(), "en")
+        framed = [ln for ln in s.splitlines() if ln.startswith("│ ")]
+        self.assertTrue(framed)
+        widths = {len(ln) for ln in framed}
+        self.assertEqual(len(widths), 1, f"rows misaligned: {widths}")
+
+    def test_ascii_bar(self):
+        self.assertEqual(bidar._ascii_bar(0, 16), "░" * 16)
+        self.assertEqual(bidar._ascii_bar(100, 16), "█" * 16)
+        self.assertEqual(len(bidar._ascii_bar(50, 16)), 16)
 
     def test_format_with_temp(self):
         d = self._fake_data(); d["cpu_temp"] = 55.0
         s = bidar._format_server_status(d, "en")
-        self.assertIn("55°C", s)
+        self.assertIn("55C", s)
 
 
 class TestServerGather(unittest.IsolatedAsyncioTestCase):

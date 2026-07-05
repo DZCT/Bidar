@@ -125,6 +125,13 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.16.1 — `.server` redesigned as an aligned ASCII card (Completed Jun 2026)
+User asked for a much prettier, real-time ASCII-styled `.server` output.
+- ✅ `_format_server_status` rewritten to render a **fixed-width ASCII box** (┌─┤│└ frame) inside a monospace ``` code block ``` so bars & columns stay perfectly aligned on every Telegram client
+- ✅ New `_ascii_bar(pct, width=16)` (█/░) for the CPU/RAM/DISK bars; localized bold header line (`🖥 Live Server Status` / `وضعیت لحظه‌ای سرور`) sits above the box; ASCII labels inside for alignment (no emoji/RTL inside the frame)
+- ✅ Added an alignment regression test (`test_format_lines_aligned`) ensuring every framed row is identical width; updated en/fa/temp tests
+- ✅ Tests: **217 passing**. Version 1.16.1
+
 ### v1.16.0 — `.docx` support for `.ask` + `.server` VPS status (Completed Jun 2026)
 Two user requests: (1) read/ask Word `.docx` files; (2) a stylish server-resource command.
 - ✅ **`.ask` now reads Word `.docx`** via `python-docx` (paragraphs + table cells). Detected by extension or OOXML mime; guarded `DOCX_LIB_OK` import + `ask_docx_lib` install hint. Usage/help text updated to mention Word. Live-verified: docx → grounded AI answers ("20 days", "Tehran").

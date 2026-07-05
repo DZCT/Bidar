@@ -102,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.16.0"
+VERSION = "1.16.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -1338,38 +1338,51 @@ async def _gather_server_status() -> dict:
     }
 
 
+def _ascii_bar(pct, width=16) -> str:
+    """Fixed-width block-character bar for the monospace ASCII server card."""
+    pct = max(0, min(100, int(round(pct))))
+    filled = round(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
 def _format_server_status(d: dict, lang: str) -> str:
-    def bar(p):
-        return f"`{_progress_bar(p)}` {int(p)}%"
+    """Render a fixed-width ASCII card (inside a monospace code block) so the
+    bars and columns stay perfectly aligned across Telegram clients."""
+    W = 42  # inner width
     lo = d["load"]
-    temp = f"  🌡 {d['cpu_temp']:.0f}°C" if d.get("cpu_temp") else ""
-    if lang == "fa":
-        return (
-            "🖥 **وضعیت سرور**\n"
-            "━━━━━━━━━━━━━━━━\n"
-            f"🧠 پردازنده  {bar(d['cpu'])}  ({d['cores']} هسته){temp}\n"
-            f"💾 رم  {bar(d['ram_pct'])}  ({_human_size(d['ram_used'])} / {_human_size(d['ram_total'])})\n"
-            f"💽 دیسک  {bar(d['disk_pct'])}  ({_human_size(d['disk_used'])} / {_human_size(d['disk_total'])})\n"
-            f"📊 بار سیستم:  {lo[0]:.2f} · {lo[1]:.2f} · {lo[2]:.2f}\n"
-            f"🌐 شبکه:  ↑ {_human_size(d['net_sent'])} · ↓ {_human_size(d['net_recv'])}\n"
-            f"⏱ آپ‌تایم سرور:  {_fmt_uptime(d['sys_uptime'])}\n"
-            f"🤖 آپ‌تایم ربات:  {_fmt_uptime(d['bot_uptime'])}\n"
-            f"🐧 سیستم:  `{d['os']}` · پایتون `{d['py']}`\n"
-            f"🏷 هاست:  `{d['host']}`"
-        )
-    return (
-        "🖥 **Server Status**\n"
-        "━━━━━━━━━━━━━━━━\n"
-        f"🧠 CPU  {bar(d['cpu'])}  ({d['cores']} cores){temp}\n"
-        f"💾 RAM  {bar(d['ram_pct'])}  ({_human_size(d['ram_used'])} / {_human_size(d['ram_total'])})\n"
-        f"💽 Disk  {bar(d['disk_pct'])}  ({_human_size(d['disk_used'])} / {_human_size(d['disk_total'])})\n"
-        f"📊 Load:  {lo[0]:.2f} · {lo[1]:.2f} · {lo[2]:.2f}\n"
-        f"🌐 Net:  ↑ {_human_size(d['net_sent'])} · ↓ {_human_size(d['net_recv'])}\n"
-        f"⏱ Server uptime:  {_fmt_uptime(d['sys_uptime'])}\n"
-        f"🤖 Bot uptime:  {_fmt_uptime(d['bot_uptime'])}\n"
-        f"🐧 OS:  `{d['os']}` · Python `{d['py']}`\n"
-        f"🏷 Host:  `{d['host']}`"
-    )
+
+    def row(s: str) -> str:
+        s = s[:W - 2]
+        return "│ " + s.ljust(W - 2) + " │"
+
+    def sep(left="├", right="┤") -> str:
+        return left + "─" * W + right
+
+    temp = f"  {d['cpu_temp']:.0f}C" if d.get("cpu_temp") else ""
+    lines = [
+        "┌" + "─" * W + "┐",
+        "│" + "SERVER  STATUS".center(W) + "│",
+        sep(),
+        row(f"CPU   {_ascii_bar(d['cpu'])} {int(round(d['cpu'])):>3}%"),
+        row(f"RAM   {_ascii_bar(d['ram_pct'])} {int(round(d['ram_pct'])):>3}%"),
+        row(f"DISK  {_ascii_bar(d['disk_pct'])} {int(round(d['disk_pct'])):>3}%"),
+        sep(),
+        row(f"RAM    {_human_size(d['ram_used'])} / {_human_size(d['ram_total'])}"),
+        row(f"Disk   {_human_size(d['disk_used'])} / {_human_size(d['disk_total'])}"),
+        row(f"CPU    {d['cores']} cores{temp}"),
+        row(f"Load   {lo[0]:.2f}  {lo[1]:.2f}  {lo[2]:.2f}"),
+        row(f"Net    up {_human_size(d['net_sent'])}  dn {_human_size(d['net_recv'])}"),
+        sep(),
+        row(f"Server up  {_fmt_uptime(d['sys_uptime'])}"),
+        row(f"Bot up     {_fmt_uptime(d['bot_uptime'])}"),
+        row(f"OS         {d['os']}"),
+        row(f"Python     {d['py']}"),
+        row(f"Host       {d['host']}"),
+        "└" + "─" * W + "┘",
+    ]
+    box = "\n".join(lines)
+    header = "🖥 **وضعیت لحظه‌ای سرور**" if lang == "fa" else "🖥 **Live Server Status**"
+    return f"{header}\n```\n{box}\n```"
 
 
 def _tldr_prompt(content: dict, lang: str) -> str:
