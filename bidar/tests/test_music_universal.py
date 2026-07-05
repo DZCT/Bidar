@@ -1812,5 +1812,139 @@ class TestCmdMixFlow(unittest.IsolatedAsyncioTestCase):
         mc.send_file.assert_awaited_once()
 
 
+# ────────────────────────────────────────────────────────────────────
+# Document Q&A (.ask)
+# ────────────────────────────────────────────────────────────────────
+class TestDocHelpers(unittest.TestCase):
+    def test_doc_is_supported(self):
+        self.assertTrue(bidar._doc_is_supported("report.pdf", ""))
+        self.assertTrue(bidar._doc_is_supported("x", "application/pdf"))
+        self.assertTrue(bidar._doc_is_supported("notes.txt", "text/plain"))
+        self.assertTrue(bidar._doc_is_supported("data.csv", ""))
+        self.assertTrue(bidar._doc_is_supported("main.py", ""))
+        self.assertTrue(bidar._doc_is_supported("config.json", ""))
+        self.assertFalse(bidar._doc_is_supported("photo.jpg", "image/jpeg"))
+        self.assertFalse(bidar._doc_is_supported("archive.zip", "application/zip"))
+        self.assertFalse(bidar._doc_is_supported("clip.mp4", "video/mp4"))
+
+    def test_extract_text_file(self):
+        data = "Hello world\nSecond line".encode("utf-8")
+        text, err, trunc = bidar._extract_document_text(data, "notes.txt", "text/plain")
+        self.assertIsNone(err)
+        self.assertFalse(trunc)
+        self.assertIn("Second line", text)
+
+    def test_extract_empty(self):
+        text, err, trunc = bidar._extract_document_text(b"   \n  ", "empty.txt", "text/plain")
+        self.assertIsNone(text)
+        self.assertEqual(err, "empty")
+
+    def test_extract_unsupported(self):
+        text, err, trunc = bidar._extract_document_text(b"\x00\x01", "a.zip", "application/zip")
+        self.assertIsNone(text)
+        self.assertEqual(err, "unsupported")
+
+    def test_extract_truncates(self):
+        big = ("x" * (bidar.MAX_DOC_CHARS + 500)).encode("utf-8")
+        text, err, trunc = bidar._extract_document_text(big, "big.txt", "text/plain")
+        self.assertIsNone(err)
+        self.assertTrue(trunc)
+        self.assertEqual(len(text), bidar.MAX_DOC_CHARS)
+
+
+class TestAnswerDocument(unittest.IsolatedAsyncioTestCase):
+    async def test_answer_uses_doc_and_history(self):
+        captured = {}
+        class FakeChat:
+            def with_model(self, *a, **k): return self
+            async def send_message(self, msg):
+                captured["text"] = msg.text
+                return "It is about cats."
+        doc = {"name": "cats.txt", "text": "Cats are great pets.",
+               "history": [("hi", "hello")]}
+        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "LlmChat", return_value=FakeChat()):
+            ans, err = await bidar._answer_document(doc, "What is this about?")
+        self.assertIsNone(err)
+        self.assertEqual(ans, "It is about cats.")
+        self.assertIn("cats.txt", captured["text"])
+        self.assertIn("Cats are great pets.", captured["text"])
+        self.assertIn("What is this about?", captured["text"])
+        self.assertIn("Q: hi", captured["text"])  # history included
+
+    async def test_answer_not_ready(self):
+        with patch.object(bidar, "_ai_ready", return_value=(False, "no key")):
+            ans, err = await bidar._answer_document({"name": "x", "text": "y", "history": []}, "q")
+        self.assertIsNone(ans)
+        self.assertEqual(err, "no key")
+
+
+class TestCmdAskFlow(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        bidar.OWNER_ID = 999
+        bidar._doc_cache.clear()
+
+    def _event(self, chat_id=55, is_reply=False, raw=""):
+        status = MagicMock(); status.delete = AsyncMock(); status.edit = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999; ev.out = True; ev.chat_id = chat_id
+        ev.is_reply = is_reply; ev.reply_to_msg_id = (7 if is_reply else None)
+        ev.pattern_match.group.return_value = raw
+        ev.edit = AsyncMock(return_value=status)
+        return ev, status
+
+    def _doc_reply(self, name="notes.txt", mime="text/plain", size=100):
+        r = MagicMock(); r.id = 7
+        r.file = MagicMock(); r.file.name = name; r.file.mime_type = mime; r.file.size = size
+        return r
+
+    async def test_load_and_answer(self):
+        ev, status = self._event(is_reply=True, raw="what is this about?")
+        replied = self._doc_reply()
+        ev.get_reply_message = AsyncMock(return_value=replied)
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_answer_document",
+                          AsyncMock(return_value=("It is about testing.", None))):
+            mc.download_media = AsyncMock(return_value=b"This document is about testing.")
+            mc.send_message = AsyncMock()
+            await bidar.cmd_ask(ev)
+        # cached and answered
+        self.assertIn(55, bidar._doc_cache)
+        self.assertEqual(bidar._doc_cache[55]["name"], "notes.txt")
+        self.assertEqual(len(bidar._doc_cache[55]["history"]), 1)
+        status.edit.assert_awaited()  # answer edited into status
+
+    async def test_followup_uses_cache(self):
+        bidar._doc_cache[55] = {"name": "d.txt", "text": "content",
+                                "history": [], "truncated": False, "ts": 0}
+        ev, status = self._event(is_reply=False, raw="a follow up question")
+        with patch.object(bidar, "client") as mc, \
+             patch.object(bidar, "_answer_document",
+                          AsyncMock(return_value=("answer 2", None))):
+            mc.send_message = AsyncMock()
+            await bidar.cmd_ask(ev)
+        self.assertEqual(len(bidar._doc_cache[55]["history"]), 1)
+        status.edit.assert_awaited()
+
+    async def test_reset_clears_cache(self):
+        bidar._doc_cache[55] = {"name": "d", "text": "x", "history": []}
+        ev, status = self._event(is_reply=False, raw="reset")
+        await bidar.cmd_ask(ev)
+        self.assertNotIn(55, bidar._doc_cache)
+
+    async def test_unsupported_file(self):
+        ev, status = self._event(is_reply=True, raw="")
+        replied = self._doc_reply(name="a.zip", mime="application/zip")
+        ev.get_reply_message = AsyncMock(return_value=replied)
+        await bidar.cmd_ask(ev)
+        self.assertNotIn(55, bidar._doc_cache)
+        ev.edit.assert_awaited()
+
+    async def test_no_doc_no_cache_shows_usage(self):
+        ev, status = self._event(is_reply=False, raw="")
+        await bidar.cmd_ask(ev)
+        ev.edit.assert_awaited()  # usage shown, no crash
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

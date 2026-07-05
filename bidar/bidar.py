@@ -22,6 +22,7 @@ import asyncio
 import base64
 import copy
 import html
+import io
 import json
 import logging
 import logging.handlers
@@ -51,6 +52,14 @@ except ImportError:
     UserMessage = None  # type: ignore
     ImageContent = None  # type: ignore
 
+# Optional: PDF text extraction (.ask)
+try:
+    import pypdf  # type: ignore
+    PDF_LIB_OK = True
+except ImportError:
+    PDF_LIB_OK = False
+    pypdf = None  # type: ignore
+
 # Optional: Text-to-Speech via Emergent Universal Key (OpenAI TTS)
 try:
     from emergentintegrations.llm.openai import OpenAITextToSpeech  # type: ignore
@@ -76,7 +85,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -368,6 +377,46 @@ I18N = {
     "mix_processing": {"en": "🎭 Combining images...", "fa": "🎭 در حال ترکیب عکس‌ها..."},
     "mix_caption": {"en": "🎭 **Combined:** {p}", "fa": "🎭 **ترکیب‌شده:** {p}"},
     "mix_caption_default": {"en": "🎭 Combined image", "fa": "🎭 عکس ترکیب‌شده"},
+
+    # .ask — Document Q&A (PDF / text files)
+    "ask_usage": {
+        "en": "📄 **Ask a document**\n\n1. **Reply** to a PDF or text file with `{p}ask` to analyse it.\n2. Then ask anything: `{p}ask what are the key points?`\n\n💡 You can also ask right away: reply to a file with `{p}ask summarise this`.\nSupported: PDF + text files (txt, md, csv, json, code, …).\n\n🧹 `{p}ask reset` — forget the loaded document.",
+        "fa": "📄 **پرسش از یه سند**\n\n۱. روی یه فایل PDF یا متنی با `{p}ask` **ریپلای** بزن تا تحلیلش کنه.\n۲. بعد هر سوالی بپرس: `{p}ask نکات کلیدیش چیه؟`\n\n💡 می‌تونی همون اول هم بپرسی: روی فایل ریپلای بزن و بنویس `{p}ask خلاصه‌ش کن`.\nپشتیبانی: PDF و فایل‌های متنی (txt, md, csv, json, کد و ...).\n\n🧹 `{p}ask reset` — فراموش کردن سند بارگذاری‌شده.",
+    },
+    "ask_analyzing": {"en": "📄 Analysing **{name}**...", "fa": "📄 در حال تحلیل **{name}**..."},
+    "ask_thinking": {"en": "🤔 Thinking...", "fa": "🤔 در حال بررسی..."},
+    "ask_loaded": {
+        "en": "✅ **{name}** loaded ({chars} chars{trunc}).\n\n{overview}\n\n💬 Ask me anything: `{p}ask <question>`",
+        "fa": "✅ **{name}** بارگذاری شد ({chars} کاراکتر{trunc}).\n\n{overview}\n\n💬 هر سوالی داری بپرس: `{p}ask <سوال>`",
+    },
+    "ask_trunc_note": {"en": ", truncated", "fa": "، برش‌خورده"},
+    "ask_no_question": {
+        "en": "📄 **{name}** is loaded. Ask a question:\n`{p}ask <your question>`",
+        "fa": "📄 **{name}** بارگذاری شده. یه سوال بپرس:\n`{p}ask <سوالت>`",
+    },
+    "ask_no_doc": {
+        "en": "⚠️ No document loaded. Reply to a PDF or text file with `{p}ask` first.",
+        "fa": "⚠️ هیچ سندی بارگذاری نشده. اول روی یه فایل PDF یا متنی با `{p}ask` ریپلای بزن.",
+    },
+    "ask_unsupported": {
+        "en": "⚠️ Unsupported file. I can read **PDF** and **text** files (txt, md, csv, json, code, …).",
+        "fa": "⚠️ فایل پشتیبانی‌نشده. فقط فایل‌های **PDF** و **متنی** (txt, md, csv, json, کد و ...) رو می‌تونم بخونم.",
+    },
+    "ask_empty": {
+        "en": "⚠️ No readable text found. If this is a scanned PDF (images only), I can't read it — try `{p}ocr` on the pages instead.",
+        "fa": "⚠️ متن قابل‌خوندنی پیدا نشد. اگه این PDF اسکن‌شده‌ست (فقط عکس)، نمی‌تونم بخونمش — به‌جاش `{p}ocr` رو روی صفحه‌ها امتحان کن.",
+    },
+    "ask_pdf_lib": {
+        "en": "❌ PDF support is not installed. Run: `pip install pypdf` and restart.",
+        "fa": "❌ پشتیبانی PDF نصب نیست. اجرا کن: `pip install pypdf` و ری‌استارت کن.",
+    },
+    "ask_too_big": {
+        "en": "⚠️ File is too large ({size}). Max is {max}.",
+        "fa": "⚠️ حجم فایل زیاده ({size}). حداکثر {max}.",
+    },
+    "ask_dl_error": {"en": "❌ Couldn't download the file: `{e}`", "fa": "❌ دانلود فایل ناموفق بود: `{e}`"},
+    "ask_failed": {"en": "❌ Couldn't answer: `{e}`", "fa": "❌ نتونستم جواب بدم: `{e}`"},
+    "ask_cleared": {"en": "🧹 Document forgotten.", "fa": "🧹 سند فراموش شد."},
 
     # .style / .aged / .cartoon
     "style_usage": {
@@ -682,7 +731,9 @@ I18N = {
             "  `{p}tldr <url>` — summarise a link (always in Persian)\n"
             "  reply + `{p}tldr` — auto-detect URLs in replied message\n"
             "  `{p}up <link>` — download a file from a link & upload it here\n"
-            "     reply + `{p}up` — auto-detect the link in the replied message\n\n"
+            "     reply + `{p}up` — auto-detect the link in the replied message\n"
+            "  `{p}ask <question>` — analyse a PDF/text file & answer questions\n"
+            "     reply to a file + `{p}ask`, then ask follow-ups anytime\n\n"
             "🔊 **Voice (Text-to-Speech)**\n"
             "  `{p}say <text>` — send text as a natural voice message\n"
             "     reply + `{p}say` — speak the replied message\n"
@@ -759,7 +810,9 @@ I18N = {
             "  `{p}tldr <لینک>` — خلاصه‌سازی لینک (همیشه فارسی)\n"
             "  ریپلای + `{p}tldr` — تشخیص خودکار لینک‌ها در پیام ریپلای‌شده\n"
             "  `{p}up <لینک>` — دانلود فایل از یه لینک و آپلودش همین‌جا\n"
-            "     ریپلای + `{p}up` — تشخیص خودکار لینک از پیام ریپلای‌شده\n\n"
+            "     ریپلای + `{p}up` — تشخیص خودکار لینک از پیام ریپلای‌شده\n"
+            "  `{p}ask <سوال>` — تحلیل فایل PDF/متنی و پاسخ به سوالات\n"
+            "     روی فایل ریپلای بزن + `{p}ask`، بعد هر وقت خواستی سوال بپرس\n\n"
             "🔊 **صدا (متن به گفتار)**\n"
             "  `{p}say <متن>` — متن رو به صورت ویس طبیعی می‌فرسته\n"
             "     ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n"
@@ -1069,6 +1122,119 @@ async def _ai_summarise(prompt: str) -> str | None:
     except Exception as e:  # noqa: BLE001
         log.error(f"[tldr] AI summarise error: {e}")
         return None
+
+
+# ────────── Document Q&A (.ask) helpers ──────────
+MAX_DOC_BYTES = 25 * 1024 * 1024   # 25 MB download cap
+MAX_DOC_CHARS = 100_000            # ~25k tokens of context
+_DOC_TEXT_EXTS = {
+    "txt", "md", "markdown", "csv", "tsv", "json", "xml", "yaml", "yml", "log",
+    "py", "js", "ts", "jsx", "tsx", "java", "c", "cpp", "h", "hpp", "go", "rs",
+    "rb", "php", "sh", "bash", "html", "htm", "css", "scss", "sql", "ini", "conf",
+    "cfg", "toml", "env", "srt", "vtt", "tex",
+}
+# In-memory per-chat document cache: chat_id -> {name, text, history, truncated, ts}
+_doc_cache: dict[int, dict] = {}
+
+
+def _doc_is_supported(name: str, mime: str) -> bool:
+    ext = os.path.splitext(name or "")[1].lower().lstrip(".")
+    mime = (mime or "").lower()
+    if ext == "pdf" or mime == "application/pdf":
+        return True
+    if mime.startswith("text/"):
+        return True
+    if ext in _DOC_TEXT_EXTS:
+        return True
+    if mime in ("application/json", "application/xml", "application/csv",
+                "application/x-yaml", "application/x-sh", "application/javascript"):
+        return True
+    return False
+
+
+def _extract_document_text(data: bytes, name: str, mime: str) -> tuple[str | None, str | None, bool]:
+    """Return (text, error_key, truncated). error_key is one of
+    'pdf_lib' / 'unsupported' / 'empty' / raw-string, or None on success."""
+    ext = os.path.splitext(name or "")[1].lower().lstrip(".")
+    mime = (mime or "").lower()
+    try:
+        if ext == "pdf" or mime == "application/pdf":
+            if not PDF_LIB_OK:
+                return None, "pdf_lib", False
+            reader = pypdf.PdfReader(io.BytesIO(data))
+            parts = []
+            for page in reader.pages:
+                try:
+                    parts.append(page.extract_text() or "")
+                except Exception:  # noqa: BLE001
+                    continue
+            text = "\n".join(parts)
+        elif _doc_is_supported(name, mime):
+            text = data.decode("utf-8", errors="replace")
+        else:
+            return None, "unsupported", False
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.ask] extract error: {e}")
+        return None, str(e)[:200], False
+    text = (text or "").strip()
+    if not text:
+        return None, "empty", False
+    truncated = len(text) > MAX_DOC_CHARS
+    return text[:MAX_DOC_CHARS], None, truncated
+
+
+async def _answer_document(doc: dict, question: str) -> tuple[str | None, str | None]:
+    """Answer `question` about the cached `doc`, using recent Q&A history for
+    follow-up context. Returns (answer, error)."""
+    ready, ai_err = _ai_ready()
+    if not ready:
+        return None, ai_err or "AI not configured"
+    history = doc.get("history", [])
+    hist_block = ""
+    if history:
+        hist_block = "\n\nEarlier in this conversation:\n" + "\n".join(
+            f"Q: {q}\nA: {a}" for q, a in history[-4:]) + "\n"
+    user_text = (
+        f"=== DOCUMENT: {doc['name']} ===\n{doc['text']}\n=== END DOCUMENT ==="
+        f"{hist_block}\n\nQuestion: {question}"
+    )
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"askdoc-{time.time_ns()}",
+            system_message=(
+                "You answer questions about a document provided by the user. Base your "
+                "answers ONLY on the document's content; if the answer is not in the "
+                "document, clearly say it is not covered. Be accurate and concise. "
+                "Reply in the SAME language as the user's question. Use Markdown "
+                "(bold key terms, bullet points) where helpful."
+            ),
+        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
+        resp = await chat.send_message(UserMessage(text=user_text))
+        return str(resp).strip(), None
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.ask] answer error: {e}")
+        return None, str(e)
+
+
+async def _reply_long(status, chat_id, text: str, reply_to) -> None:
+    """Edit `status` with `text`, spilling overflow into follow-up messages
+    (Telegram ~4096-char limit)."""
+    if len(text) <= 3900:
+        try:
+            await status.edit(text, link_preview=False)
+        except Exception:  # noqa: BLE001
+            try:
+                await status.delete()
+            except Exception:  # noqa: BLE001
+                pass
+            await client.send_message(chat_id, text, link_preview=False, reply_to=reply_to)
+        return
+    await status.edit(text[:3900] + "\n\n…", link_preview=False)
+    rest = text[3900:]
+    while rest:
+        piece, rest = rest[:3900], rest[3900:]
+        await client.send_message(chat_id, piece, link_preview=False, reply_to=reply_to)
 
 
 def _tldr_prompt(content: dict, lang: str) -> str:
@@ -3735,6 +3901,114 @@ async def cmd_upload(event):
         await _safe_edit(status, t("up_failed", e=str(e)[:200]))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ═════════ Document Q&A (.ask / .pdf) ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}(?:ask|pdf)(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_ask(event):
+    """Analyse a PDF/text file and answer questions about it (multi-turn)."""
+    raw = (event.pattern_match.group(1) or "").strip()
+
+    if raw.lower() in ("reset", "clear", "forget", "بازنشانی", "پاک", "فراموش"):
+        _doc_cache.pop(event.chat_id, None)
+        await event.edit(t("ask_cleared"))
+        return
+
+    # Detect a supported document on the replied message (the "load" path)
+    replied = None
+    doc_meta = None
+    if event.is_reply:
+        try:
+            replied = await event.get_reply_message()
+        except Exception:  # noqa: BLE001
+            replied = None
+        if replied:
+            f = getattr(replied, "file", None)
+            if f and (getattr(f, "name", None) or getattr(f, "mime_type", None)):
+                name = getattr(f, "name", None) or "document"
+                mime = getattr(f, "mime_type", "") or ""
+                size = getattr(f, "size", 0) or 0
+                if (mime or "").lower().startswith("image/"):
+                    pass  # images belong to .r / .ocr, not .ask
+                elif _doc_is_supported(name, mime):
+                    doc_meta = (name, mime, size)
+                else:
+                    await event.edit(t("ask_unsupported"))
+                    return
+
+    if doc_meta:
+        name, mime, size = doc_meta
+        if size and size > MAX_DOC_BYTES:
+            await event.edit(t("ask_too_big", size=_human_size(size),
+                                max=_human_size(MAX_DOC_BYTES)))
+            return
+        status = await event.edit(t("ask_analyzing", name=name[:60]))
+        try:
+            data = await client.download_media(replied, file=bytes)
+        except Exception as e:  # noqa: BLE001
+            await status.edit(t("ask_dl_error", e=str(e)[:200]))
+            return
+        if not isinstance(data, bytes) or not data:
+            await status.edit(t("ask_dl_error", e="empty file"))
+            return
+
+        text, err, truncated = _extract_document_text(data, name, mime)
+        if err == "pdf_lib":
+            await status.edit(t("ask_pdf_lib"))
+            return
+        if err == "unsupported":
+            await status.edit(t("ask_unsupported"))
+            return
+        if err == "empty":
+            await status.edit(t("ask_empty", p=CMD_PREFIX))
+            return
+        if err:
+            await status.edit(t("ask_failed", e=err))
+            return
+
+        doc = {"name": name, "text": text, "history": [],
+               "truncated": truncated, "ts": time.time()}
+        _doc_cache[event.chat_id] = doc
+        reply_to = replied.id
+
+        if raw:
+            ans, gerr = await _answer_document(doc, raw)
+            if not ans:
+                await status.edit(t("ask_failed", e=(gerr or "")[:200]))
+                return
+            doc["history"].append((raw, ans))
+            await _reply_long(status, event.chat_id, ans, reply_to)
+        else:
+            overview, _ = await _answer_document(
+                doc, "Give a brief overview: what is this document about, its main "
+                     "topics/sections, and key takeaways. Keep it under 8 bullet points.")
+            trunc = t("ask_trunc_note") if truncated else ""
+            body = t("ask_loaded", name=name, chars=f"{len(text):,}", trunc=trunc,
+                     overview=(overview or ""), p=CMD_PREFIX)
+            await _reply_long(status, event.chat_id, body, reply_to)
+        log.info(f"[.ask] loaded {name} ({len(text)} chars, trunc={truncated}) "
+                 f"q={'yes' if raw else 'no'}")
+        return
+
+    # No document on reply → follow-up question on the cached document
+    cached = _doc_cache.get(event.chat_id)
+    if not cached:
+        await event.edit(t("ask_no_doc", p=CMD_PREFIX) if (raw or event.is_reply)
+                         else t("ask_usage", p=CMD_PREFIX))
+        return
+    if not raw:
+        await event.edit(t("ask_no_question", name=cached["name"], p=CMD_PREFIX))
+        return
+    status = await event.edit(t("ask_thinking"))
+    ans, gerr = await _answer_document(cached, raw)
+    if not ans:
+        await status.edit(t("ask_failed", e=(gerr or "")[:200]))
+        return
+    cached["history"].append((raw, ans))
+    cached["history"] = cached["history"][-6:]
+    await _reply_long(status, event.chat_id, ans, event.reply_to_msg_id)
+    log.info(f"[.ask] follow-up on {cached['name']}")
 
 
 # ═════════ TL;DR — Link summariser ═════════

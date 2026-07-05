@@ -125,6 +125,17 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.15.0 — `.ask` Document Q&A (Chat with a PDF/text file) (Completed Jun 2026)
+New feature (user request): analyse a PDF or text file, then answer any question about it — multi-turn.
+- ✅ `.ask` (alias `.pdf`): **reply to a file** to load & analyse it; `.ask <question>` on the reply answers immediately; subsequent `.ask <q>` (no reply) are **follow-ups** on the cached document (keeps last ~6 Q&A for context)
+- ✅ `.ask reset` (also `clear`/`forget`/`پاک`/`فراموش`) clears the per-chat cache
+- ✅ Supported: **PDF** (via `pypdf`, extracted page-by-page) + text files (txt, md, csv, json, code, yaml, html, srt, …). Scanned/image-only PDFs are detected → user pointed to `.ocr`
+- ✅ Downloaded to bytes (25 MB cap), extracted in-memory, capped at 100k chars (~25k tokens), truncation flagged. Answers grounded strictly in the document, in the SAME language as the question
+- ✅ New helpers: `_doc_is_supported`, `_extract_document_text`, `_answer_document` (uses `config["ai_model"]` = gemini-3-flash), `_reply_long` (chunked >4096 output); in-memory `_doc_cache` keyed by chat_id
+- ✅ New dep: `pypdf==6.14.2` (added to requirements.txt); optional import guarded (`PDF_LIB_OK`) so the bot still runs without it
+- ✅ Bilingual i18n + help menu (`📰 Web` section) + version 1.15.0
+- ✅ Tests: **207 passing** (+16: TestDocHelpers, TestAnswerDocument, TestCmdAskFlow) + real E2E (real dummy.pdf extracted; markdown doc → correct grounded answers for "2 GB"/"nova"; multi-turn follow-up correctly answered "Python")
+
 ### v1.14.0 — `.mix` Combine Two Images (Completed Jun 2026)
 New feature (user request): merge/blend two images into one via Gemini Nano Banana — with an optional prompt.
 - ✅ `.mix [prompt]` (aliases `.combine` / `.merge`): if a prompt is given it guides the composition; without one, the two images are blended automatically

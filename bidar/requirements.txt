@@ -2,3 +2,4 @@ telethon>=1.36.0
 python-dotenv>=1.0.0
 emergentintegrations
 yt-dlp>=2025.1.1
+pypdf==6.14.2
