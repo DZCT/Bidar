@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.15.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.16.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -320,7 +320,19 @@ sudo systemctl enable --now bidar
 | `.ask <سوال>` (بدون reply) | سوال پیگیری روی همون سند بارگذاری‌شده (چند مرحله‌ای) |
 | `.ask reset` | فراموش کردن سند بارگذاری‌شده |
 
-> 🧠 بعد از یک‌بار بارگذاری، می‌تونی **هر تعداد سوال** درباره سند بپرسی (با حافظه مکالمه). پشتیبانی: **PDF** و فایل‌های متنی (txt, md, csv, json, کد و ...). جواب‌ها فقط بر اساس محتوای سند و به **زبان سوال تو** داده می‌شن. PDFهای اسکن‌شده (فقط عکس) قابل خوندن نیستن — براشون از `.ocr` استفاده کن.
+> 🧠 بعد از یک‌بار بارگذاری، می‌تونی **هر تعداد سوال** درباره سند بپرسی (با حافظه مکالمه). پشتیبانی: **PDF**، **ورد (.docx)** و فایل‌های متنی (txt, md, csv, json, کد و ...). جواب‌ها فقط بر اساس محتوای سند و به **زبان سوال تو** داده می‌شن. PDFهای اسکن‌شده (فقط عکس) قابل خوندن نیستن — براشون از `.ocr` استفاده کن.
+
+</div>
+
+### 🖥 وضعیت سرور (`.server`)
+
+<div dir="rtl">
+
+| دستور | کاربرد |
+|:---|:---|
+| `.server` (یا `.sys` / `.vps`) | نمایش شیک مصرف منابع سرور مجازی |
+
+> 📊 یه کارت جذاب با نوار پیشرفت نشون می‌ده: **پردازنده** (٪ + تعداد هسته + دما در صورت وجود)، **رم**، **دیسک**، بار سیستم (load)، ترافیک شبکه ↑↓، آپ‌تایم سرور و ربات، سیستم‌عامل/پایتون و نام هاست. (نیازمند `psutil`)
 
 </div>
 

@@ -28,6 +28,7 @@ import logging
 import logging.handlers
 import mimetypes
 import os
+import platform
 import re
 import shutil
 import tempfile
@@ -60,6 +61,22 @@ except ImportError:
     PDF_LIB_OK = False
     pypdf = None  # type: ignore
 
+# Optional: Word (.docx) text extraction (.ask)
+try:
+    import docx  # type: ignore  (python-docx)
+    DOCX_LIB_OK = True
+except ImportError:
+    DOCX_LIB_OK = False
+    docx = None  # type: ignore
+
+# Optional: server resource metrics (.server)
+try:
+    import psutil  # type: ignore
+    PSUTIL_OK = True
+except ImportError:
+    PSUTIL_OK = False
+    psutil = None  # type: ignore
+
 # Optional: Text-to-Speech via Emergent Universal Key (OpenAI TTS)
 try:
     from emergentintegrations.llm.openai import OpenAITextToSpeech  # type: ignore
@@ -85,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.15.0"
+VERSION = "1.16.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -380,8 +397,8 @@ I18N = {
 
     # .ask — Document Q&A (PDF / text files)
     "ask_usage": {
-        "en": "📄 **Ask a document**\n\n1. **Reply** to a PDF or text file with `{p}ask` to analyse it.\n2. Then ask anything: `{p}ask what are the key points?`\n\n💡 You can also ask right away: reply to a file with `{p}ask summarise this`.\nSupported: PDF + text files (txt, md, csv, json, code, …).\n\n🧹 `{p}ask reset` — forget the loaded document.",
-        "fa": "📄 **پرسش از یه سند**\n\n۱. روی یه فایل PDF یا متنی با `{p}ask` **ریپلای** بزن تا تحلیلش کنه.\n۲. بعد هر سوالی بپرس: `{p}ask نکات کلیدیش چیه؟`\n\n💡 می‌تونی همون اول هم بپرسی: روی فایل ریپلای بزن و بنویس `{p}ask خلاصه‌ش کن`.\nپشتیبانی: PDF و فایل‌های متنی (txt, md, csv, json, کد و ...).\n\n🧹 `{p}ask reset` — فراموش کردن سند بارگذاری‌شده.",
+        "en": "📄 **Ask a document**\n\n1. **Reply** to a PDF, Word (.docx) or text file with `{p}ask` to analyse it.\n2. Then ask anything: `{p}ask what are the key points?`\n\n💡 You can also ask right away: reply to a file with `{p}ask summarise this`.\nSupported: PDF, Word (.docx) + text files (txt, md, csv, json, code, …).\n\n🧹 `{p}ask reset` — forget the loaded document.",
+        "fa": "📄 **پرسش از یه سند**\n\n۱. روی یه فایل PDF، ورد (.docx) یا متنی با `{p}ask` **ریپلای** بزن تا تحلیلش کنه.\n۲. بعد هر سوالی بپرس: `{p}ask نکات کلیدیش چیه؟`\n\n💡 می‌تونی همون اول هم بپرسی: روی فایل ریپلای بزن و بنویس `{p}ask خلاصه‌ش کن`.\nپشتیبانی: PDF، ورد (.docx) و فایل‌های متنی (txt, md, csv, json, کد و ...).\n\n🧹 `{p}ask reset` — فراموش کردن سند بارگذاری‌شده.",
     },
     "ask_analyzing": {"en": "📄 Analysing **{name}**...", "fa": "📄 در حال تحلیل **{name}**..."},
     "ask_thinking": {"en": "🤔 Thinking...", "fa": "🤔 در حال بررسی..."},
@@ -410,6 +427,10 @@ I18N = {
         "en": "❌ PDF support is not installed. Run: `pip install pypdf` and restart.",
         "fa": "❌ پشتیبانی PDF نصب نیست. اجرا کن: `pip install pypdf` و ری‌استارت کن.",
     },
+    "ask_docx_lib": {
+        "en": "❌ Word (.docx) support is not installed. Run: `pip install python-docx` and restart.",
+        "fa": "❌ پشتیبانی Word (.docx) نصب نیست. اجرا کن: `pip install python-docx` و ری‌استارت کن.",
+    },
     "ask_too_big": {
         "en": "⚠️ File is too large ({size}). Max is {max}.",
         "fa": "⚠️ حجم فایل زیاده ({size}). حداکثر {max}.",
@@ -417,6 +438,14 @@ I18N = {
     "ask_dl_error": {"en": "❌ Couldn't download the file: `{e}`", "fa": "❌ دانلود فایل ناموفق بود: `{e}`"},
     "ask_failed": {"en": "❌ Couldn't answer: `{e}`", "fa": "❌ نتونستم جواب بدم: `{e}`"},
     "ask_cleared": {"en": "🧹 Document forgotten.", "fa": "🧹 سند فراموش شد."},
+
+    # .server — VPS resource status
+    "server_gathering": {"en": "🖥 Reading server metrics...", "fa": "🖥 در حال خوندن وضعیت سرور..."},
+    "server_no_psutil": {
+        "en": "❌ Server metrics unavailable. Run: `pip install psutil` and restart.",
+        "fa": "❌ نمایش وضعیت سرور در دسترس نیست. اجرا کن: `pip install psutil` و ری‌استارت کن.",
+    },
+    "server_error": {"en": "❌ Couldn't read server status: `{e}`", "fa": "❌ خواندن وضعیت سرور ناموفق: `{e}`"},
 
     # .style / .aged / .cartoon
     "style_usage": {
@@ -755,6 +784,7 @@ I18N = {
             "  `{p}alive` — health check\n"
             "  `{p}ping` — latency test\n"
             "  `{p}stats` — full stats & settings\n"
+            "  `{p}server` — VPS resource usage (CPU / RAM / disk)\n"
             "  `{p}id` — chat / user ID\n\n"
             "🔧 **Admin**\n"
             "  `{p}botlang <en|fa>` — change UI language\n"
@@ -834,6 +864,7 @@ I18N = {
             "  `{p}alive` — چک زنده بودن ربات\n"
             "  `{p}ping` — تست تاخیر (ms)\n"
             "  `{p}stats` — همه آمار و تنظیمات فعلی\n"
+            "  `{p}server` — مصرف منابع سرور (پردازنده/رم/دیسک)\n"
             "  `{p}id` — آیدی چت/کاربر\n\n"
             "🔧 **مدیریت**\n"
             "  `{p}botlang <en|fa>` — تغییر زبان رابط\n"
@@ -1142,6 +1173,8 @@ def _doc_is_supported(name: str, mime: str) -> bool:
     mime = (mime or "").lower()
     if ext == "pdf" or mime == "application/pdf":
         return True
+    if ext == "docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return True
     if mime.startswith("text/"):
         return True
     if ext in _DOC_TEXT_EXTS:
@@ -1152,11 +1185,25 @@ def _doc_is_supported(name: str, mime: str) -> bool:
     return False
 
 
+def _extract_docx_text(data: bytes) -> str:
+    """Extract paragraphs + table cells from a .docx file."""
+    document = docx.Document(io.BytesIO(data))
+    parts = [p.text for p in document.paragraphs if p.text and p.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n".join(parts)
+
+
 def _extract_document_text(data: bytes, name: str, mime: str) -> tuple[str | None, str | None, bool]:
     """Return (text, error_key, truncated). error_key is one of
-    'pdf_lib' / 'unsupported' / 'empty' / raw-string, or None on success."""
+    'pdf_lib' / 'docx_lib' / 'unsupported' / 'empty' / raw-string, or None on success."""
     ext = os.path.splitext(name or "")[1].lower().lstrip(".")
     mime = (mime or "").lower()
+    is_docx = (ext == "docx" or
+               mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
     try:
         if ext == "pdf" or mime == "application/pdf":
             if not PDF_LIB_OK:
@@ -1169,6 +1216,10 @@ def _extract_document_text(data: bytes, name: str, mime: str) -> tuple[str | Non
                 except Exception:  # noqa: BLE001
                     continue
             text = "\n".join(parts)
+        elif is_docx:
+            if not DOCX_LIB_OK:
+                return None, "docx_lib", False
+            text = _extract_docx_text(data)
         elif _doc_is_supported(name, mime):
             text = data.decode("utf-8", errors="replace")
         else:
@@ -1235,6 +1286,90 @@ async def _reply_long(status, chat_id, text: str, reply_to) -> None:
     while rest:
         piece, rest = rest[:3900], rest[3900:]
         await client.send_message(chat_id, piece, link_preview=False, reply_to=reply_to)
+
+
+# ────────── Server status (.server) helpers ──────────
+def _fmt_uptime(seconds) -> str:
+    seconds = int(seconds or 0)
+    d, rem = divmod(seconds, 86400)
+    h, rem = divmod(rem, 3600)
+    m, _ = divmod(rem, 60)
+    parts = []
+    if d:
+        parts.append(f"{d}d")
+    if h:
+        parts.append(f"{h}h")
+    if m or not parts:
+        parts.append(f"{m}m")
+    return " ".join(parts)
+
+
+async def _gather_server_status() -> dict:
+    cpu = await asyncio.to_thread(psutil.cpu_percent, 0.5)
+    vm = psutil.virtual_memory()
+    du = psutil.disk_usage("/")
+    try:
+        load = psutil.getloadavg()
+    except (AttributeError, OSError):
+        load = (0.0, 0.0, 0.0)
+    net = psutil.net_io_counters()
+    cpu_temp = None
+    try:
+        for _name, entries in (psutil.sensors_temperatures() or {}).items():
+            for e in entries:
+                if e.current:
+                    cpu_temp = e.current
+                    break
+            if cpu_temp:
+                break
+    except Exception:  # noqa: BLE001
+        cpu_temp = None
+    return {
+        "cpu": cpu,
+        "cores": psutil.cpu_count(logical=True) or 0,
+        "ram_pct": vm.percent, "ram_used": vm.used, "ram_total": vm.total,
+        "disk_pct": du.percent, "disk_used": du.used, "disk_total": du.total,
+        "load": load, "net_sent": net.bytes_sent, "net_recv": net.bytes_recv,
+        "sys_uptime": time.time() - psutil.boot_time(),
+        "bot_uptime": time.time() - stats["start_time"],
+        "os": f"{platform.system()} {platform.release()}",
+        "host": platform.node(), "py": platform.python_version(),
+        "cpu_temp": cpu_temp,
+    }
+
+
+def _format_server_status(d: dict, lang: str) -> str:
+    def bar(p):
+        return f"`{_progress_bar(p)}` {int(p)}%"
+    lo = d["load"]
+    temp = f"  🌡 {d['cpu_temp']:.0f}°C" if d.get("cpu_temp") else ""
+    if lang == "fa":
+        return (
+            "🖥 **وضعیت سرور**\n"
+            "━━━━━━━━━━━━━━━━\n"
+            f"🧠 پردازنده  {bar(d['cpu'])}  ({d['cores']} هسته){temp}\n"
+            f"💾 رم  {bar(d['ram_pct'])}  ({_human_size(d['ram_used'])} / {_human_size(d['ram_total'])})\n"
+            f"💽 دیسک  {bar(d['disk_pct'])}  ({_human_size(d['disk_used'])} / {_human_size(d['disk_total'])})\n"
+            f"📊 بار سیستم:  {lo[0]:.2f} · {lo[1]:.2f} · {lo[2]:.2f}\n"
+            f"🌐 شبکه:  ↑ {_human_size(d['net_sent'])} · ↓ {_human_size(d['net_recv'])}\n"
+            f"⏱ آپ‌تایم سرور:  {_fmt_uptime(d['sys_uptime'])}\n"
+            f"🤖 آپ‌تایم ربات:  {_fmt_uptime(d['bot_uptime'])}\n"
+            f"🐧 سیستم:  `{d['os']}` · پایتون `{d['py']}`\n"
+            f"🏷 هاست:  `{d['host']}`"
+        )
+    return (
+        "🖥 **Server Status**\n"
+        "━━━━━━━━━━━━━━━━\n"
+        f"🧠 CPU  {bar(d['cpu'])}  ({d['cores']} cores){temp}\n"
+        f"💾 RAM  {bar(d['ram_pct'])}  ({_human_size(d['ram_used'])} / {_human_size(d['ram_total'])})\n"
+        f"💽 Disk  {bar(d['disk_pct'])}  ({_human_size(d['disk_used'])} / {_human_size(d['disk_total'])})\n"
+        f"📊 Load:  {lo[0]:.2f} · {lo[1]:.2f} · {lo[2]:.2f}\n"
+        f"🌐 Net:  ↑ {_human_size(d['net_sent'])} · ↓ {_human_size(d['net_recv'])}\n"
+        f"⏱ Server uptime:  {_fmt_uptime(d['sys_uptime'])}\n"
+        f"🤖 Bot uptime:  {_fmt_uptime(d['bot_uptime'])}\n"
+        f"🐧 OS:  `{d['os']}` · Python `{d['py']}`\n"
+        f"🏷 Host:  `{d['host']}`"
+    )
 
 
 def _tldr_prompt(content: dict, lang: str) -> str:
@@ -3957,6 +4092,9 @@ async def cmd_ask(event):
         if err == "pdf_lib":
             await status.edit(t("ask_pdf_lib"))
             return
+        if err == "docx_lib":
+            await status.edit(t("ask_docx_lib"))
+            return
         if err == "unsupported":
             await status.edit(t("ask_unsupported"))
             return
@@ -4009,6 +4147,25 @@ async def cmd_ask(event):
     cached["history"] = cached["history"][-6:]
     await _reply_long(status, event.chat_id, ans, event.reply_to_msg_id)
     log.info(f"[.ask] follow-up on {cached['name']}")
+
+
+# ═════════ Server status (.server / .sys / .vps) ═════════
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}(?:server|sys|vps)$"))
+@owner_only
+async def cmd_server(event):
+    """Show a stylish VPS resource-usage card (CPU / RAM / disk / uptime / net)."""
+    if not PSUTIL_OK:
+        await event.edit(t("server_no_psutil"))
+        return
+    msg = await event.edit(t("server_gathering"))
+    try:
+        data = await _gather_server_status()
+        await msg.edit(_format_server_status(data, config.get("bot_lang", "en")),
+                       link_preview=False)
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.server] {e}")
+        await msg.edit(t("server_error", e=str(e)[:200]))
+    log.info("[.server] status shown")
 
 
 # ═════════ TL;DR — Link summariser ═════════
@@ -4527,7 +4684,7 @@ _BOT_MSG_PREFIXES = (
     # Captions / fresh messages sent by other features (search, image tools,
     # tldr, sum, ocr, uploader) — may themselves contain music URLs and must be ignored.
     "🔍", "🔒", "🎨", "🖼", "👴", "🧒", "📰", "🌐", "📦", "▶️", "📊", "📖",
-    "📥", "🎬", "📄", "🎭",
+    "📥", "🎬", "📄", "🎭", "🖥",
 )
 
 

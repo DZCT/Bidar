@@ -125,6 +125,14 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.16.0 — `.docx` support for `.ask` + `.server` VPS status (Completed Jun 2026)
+Two user requests: (1) read/ask Word `.docx` files; (2) a stylish server-resource command.
+- ✅ **`.ask` now reads Word `.docx`** via `python-docx` (paragraphs + table cells). Detected by extension or OOXML mime; guarded `DOCX_LIB_OK` import + `ask_docx_lib` install hint. Usage/help text updated to mention Word. Live-verified: docx → grounded AI answers ("20 days", "Tehran").
+- ✅ **`.server`** (aliases `.sys` / `.vps`): a beautiful bilingual resource card — CPU (with % bar + core count + temp if available), RAM, Disk (all with `_progress_bar`), load average, network ↑/↓, server uptime, bot uptime, OS/Python, hostname. Powered by `psutil` (guarded `PSUTIL_OK`; `pip install psutil` hint if missing). CPU sampled via `asyncio.to_thread` (non-blocking).
+- ✅ New helpers: `_extract_docx_text`, `_fmt_uptime` (renamed to avoid clash with existing `_fmt_duration`), `_gather_server_status`, `_format_server_status`. Reuses `_human_size` / `_progress_bar`.
+- ✅ New deps: `python-docx==1.2.0`, `psutil==7.2.2` (added to requirements.txt). Help menu (`⚙️ System`) + `_BOT_MSG_PREFIXES` (🖥) updated. Version 1.16.0.
+- ✅ Tests: **215 passing** (+8: TestDocxSupport, TestServerStatus, TestServerGather) + real E2E (docx AI Q&A + live server card in en/fa).
+
 ### v1.15.0 — `.ask` Document Q&A (Chat with a PDF/text file) (Completed Jun 2026)
 New feature (user request): analyse a PDF or text file, then answer any question about it — multi-turn.
 - ✅ `.ask` (alias `.pdf`): **reply to a file** to load & analyse it; `.ask <question>` on the reply answers immediately; subsequent `.ask <q>` (no reply) are **follow-ups** on the cached document (keeps last ~6 Q&A for context)

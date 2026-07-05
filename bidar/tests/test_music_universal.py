@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import io
 import base64
 import asyncio
 import tempfile
@@ -1944,6 +1945,84 @@ class TestCmdAskFlow(unittest.IsolatedAsyncioTestCase):
         ev, status = self._event(is_reply=False, raw="")
         await bidar.cmd_ask(ev)
         ev.edit.assert_awaited()  # usage shown, no crash
+
+
+# ────────────────────────────────────────────────────────────────────
+# Word (.docx) support + Server status (.server)
+# ────────────────────────────────────────────────────────────────────
+def _make_docx_bytes(text: str) -> bytes:
+    import docx as _docx
+    d = _docx.Document()
+    d.add_paragraph(text)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+class TestDocxSupport(unittest.TestCase):
+    def test_docx_is_supported(self):
+        self.assertTrue(bidar._doc_is_supported("resume.docx", ""))
+        self.assertTrue(bidar._doc_is_supported(
+            "x", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+
+    def test_extract_docx(self):
+        data = _make_docx_bytes("Hello from a Word document")
+        text, err, trunc = bidar._extract_document_text(data, "a.docx", "")
+        self.assertIsNone(err)
+        self.assertIn("Hello from a Word document", text)
+
+    def test_extract_docx_by_mime(self):
+        data = _make_docx_bytes("Content via mime")
+        text, err, trunc = bidar._extract_document_text(
+            data, "noext",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        self.assertIsNone(err)
+        self.assertIn("Content via mime", text)
+
+
+class TestServerStatus(unittest.TestCase):
+    def test_fmt_uptime(self):
+        self.assertEqual(bidar._fmt_uptime(0), "0m")
+        self.assertEqual(bidar._fmt_uptime(90), "1m")
+        self.assertEqual(bidar._fmt_uptime(3661), "1h 1m")
+        self.assertEqual(bidar._fmt_uptime(90000), "1d 1h")
+
+    def _fake_data(self):
+        return {
+            "cpu": 42.0, "cores": 4, "ram_pct": 61.0,
+            "ram_used": 2 * 1024**3, "ram_total": 4 * 1024**3,
+            "disk_pct": 28.0, "disk_used": 14 * 1024**3, "disk_total": 50 * 1024**3,
+            "load": (0.42, 0.55, 0.60), "net_sent": 1024**3, "net_recv": 8 * 1024**3,
+            "sys_uptime": 273120, "bot_uptime": 18180,
+            "os": "Linux 5.15", "host": "vps-01", "py": "3.11.5", "cpu_temp": None,
+        }
+
+    def test_format_en(self):
+        s = bidar._format_server_status(self._fake_data(), "en")
+        self.assertIn("Server Status", s)
+        self.assertIn("42%", s)
+        self.assertIn("4 cores", s)
+        self.assertIn("Python", s)
+
+    def test_format_fa(self):
+        s = bidar._format_server_status(self._fake_data(), "fa")
+        self.assertIn("وضعیت سرور", s)
+        self.assertIn("42%", s)
+        self.assertIn("هسته", s)
+
+    def test_format_with_temp(self):
+        d = self._fake_data(); d["cpu_temp"] = 55.0
+        s = bidar._format_server_status(d, "en")
+        self.assertIn("55°C", s)
+
+
+class TestServerGather(unittest.IsolatedAsyncioTestCase):
+    async def test_gather_real_metrics(self):
+        d = await bidar._gather_server_status()
+        for k in ("cpu", "cores", "ram_pct", "disk_pct", "load",
+                  "sys_uptime", "bot_uptime", "os", "py", "host"):
+            self.assertIn(k, d)
+        self.assertGreaterEqual(d["ram_pct"], 0)
 
 
 if __name__ == "__main__":
