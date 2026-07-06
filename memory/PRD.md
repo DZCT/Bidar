@@ -125,6 +125,16 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.17.0 — `.file` Text → File (Completed Jun 2026)
+New feature (user request): turn text into a downloadable file with a chosen extension.
+- ✅ `.file <ext> <text>` → creates `file.<ext>` from the text and sends it (as a document)
+- ✅ `.file <name.ext> <text>` → use a full custom filename (e.g. `config.json`)
+- ✅ **reply** to any message + `.file <ext>` → turns that message's text into a file
+- ✅ Multiline content supported (paste code after the extension); UTF-8 (Persian-safe)
+- ✅ `_build_filename` sanitizes path chars, handles bare ext / dotted-ext / full name, defaults to `.txt`; always `force_document=True`; compact caption (name · size); temp dir cleaned; processing message deleted (guarded)
+- ✅ Aliases `.mkfile` / `.tofile`; bilingual i18n + help menu; version 1.17.0
+- ✅ Tests: **226 passing** (+11: TestBuildFilename, TestCmdMkfile) + real E2E (multiline .py, full-name .json, reply→.srt)
+
 ### v1.16.1 — `.server` redesigned as an aligned ASCII card (Completed Jun 2026)
 User asked for a much prettier, real-time ASCII-styled `.server` output.
 - ✅ `_format_server_status` rewritten to render a **fixed-width ASCII box** (┌─┤│└ frame) inside a monospace ``` code block ``` so bars & columns stay perfectly aligned on every Telegram client

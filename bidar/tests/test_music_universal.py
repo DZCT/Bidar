@@ -2040,5 +2040,108 @@ class TestServerGather(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(d["ram_pct"], 0)
 
 
+# ────────────────────────────────────────────────────────────────────
+# Text → file (.file)
+# ────────────────────────────────────────────────────────────────────
+class TestBuildFilename(unittest.TestCase):
+    def test_bare_extension(self):
+        self.assertEqual(bidar._build_filename("py"), "file.py")
+        self.assertEqual(bidar._build_filename(".json"), "file.json")
+        self.assertEqual(bidar._build_filename("TXT"), "file.TXT")
+
+    def test_full_filename(self):
+        self.assertEqual(bidar._build_filename("notes.md"), "notes.md")
+        self.assertEqual(bidar._build_filename("my.data.json"), "my.data.json")
+
+    def test_sanitizes_path_chars(self):
+        got = bidar._build_filename("../../etc/passwd.txt")
+        self.assertNotIn("/", got)
+        self.assertTrue(got.endswith(".txt"))
+
+    def test_no_extension_defaults_txt(self):
+        self.assertTrue(bidar._build_filename("weird!!name").endswith(".txt")
+                        or bidar._build_filename("weird!!name") == "file.weirdname")
+
+
+class TestCmdMkfile(unittest.IsolatedAsyncioTestCase):
+    def _event(self, is_reply=False, raw=""):
+        status = MagicMock(); status.delete = AsyncMock(); status.edit = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999; ev.out = True; ev.chat_id = 55
+        ev.is_reply = is_reply; ev.reply_to_msg_id = (7 if is_reply else None)
+        ev.pattern_match.group.return_value = raw
+        ev.edit = AsyncMock(return_value=status)
+        return ev, status
+
+    async def test_text_mode(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(raw='py print("hi")')
+        sent = {}
+        async def fake_send_file(chat_id, path, **kw):
+            with open(path, "rb") as f:
+                sent["content"] = f.read().decode()
+            sent["name"] = os.path.basename(path)
+            sent["force_document"] = kw.get("force_document")
+            sent["caption"] = kw.get("caption")
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            await bidar.cmd_mkfile(ev)
+        self.assertEqual(sent["name"], "file.py")
+        self.assertEqual(sent["content"], 'print("hi")')
+        self.assertTrue(sent["force_document"])
+        status.delete.assert_awaited_once()
+
+    async def test_reply_mode(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(is_reply=True, raw="txt")
+        replied = MagicMock(); replied.id = 7
+        replied.raw_text = "content from replied message"
+        replied.text = replied.raw_text
+        ev.get_reply_message = AsyncMock(return_value=replied)
+        sent = {}
+        async def fake_send_file(chat_id, path, **kw):
+            with open(path, "rb") as f:
+                sent["content"] = f.read().decode()
+            sent["name"] = os.path.basename(path)
+            sent["reply_to"] = kw.get("reply_to")
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            await bidar.cmd_mkfile(ev)
+        self.assertEqual(sent["name"], "file.txt")
+        self.assertEqual(sent["content"], "content from replied message")
+        self.assertEqual(sent["reply_to"], 7)
+
+    async def test_full_filename_mode(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(raw="config.json {\"a\": 1}")
+        sent = {}
+        async def fake_send_file(chat_id, path, **kw):
+            sent["name"] = os.path.basename(path)
+            with open(path, "rb") as f:
+                sent["content"] = f.read().decode()
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            await bidar.cmd_mkfile(ev)
+        self.assertEqual(sent["name"], "config.json")
+        self.assertEqual(sent["content"], '{"a": 1}')
+
+    async def test_no_text_errors(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(is_reply=False, raw="py")
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock()
+            await bidar.cmd_mkfile(ev)
+        mc.send_file.assert_not_called()
+        ev.edit.assert_awaited()
+
+    async def test_usage_when_empty(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(raw="")
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock()
+            await bidar.cmd_mkfile(ev)
+        mc.send_file.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

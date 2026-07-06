@@ -102,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.16.1"
+VERSION = "1.17.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -447,6 +447,22 @@ I18N = {
     },
     "server_error": {"en": "❌ Couldn't read server status: `{e}`", "fa": "❌ خواندن وضعیت سرور ناموفق: `{e}`"},
 
+    # .file — text → file
+    "file_usage": {
+        "en": "📄 **Text → File**\n\n  `{p}file <ext> <text>` — make a file with that extension\n  `{p}file <name.ext> <text>` — use a full filename\n  reply to a message + `{p}file <ext>` — turn it into a file\n\n📝 Examples:\n  `{p}file py print(\"hi\")`\n  `{p}file notes.md # My notes`\n  (reply to a message) `{p}file txt`",
+        "fa": "📄 **متن → فایل**\n\n  `{p}file <پسوند> <متن>` — یه فایل با اون پسوند می‌سازه\n  `{p}file <نام.پسوند> <متن>` — با نام کامل دلخواه\n  ریپلای روی یه پیام + `{p}file <پسوند>` — تبدیلش به فایل\n\n📝 مثال‌ها:\n  `{p}file py print(\"سلام\")`\n  `{p}file notes.md # یادداشت من`\n  (ریپلای روی پیام) `{p}file txt`",
+    },
+    "file_no_text": {
+        "en": "⚠️ No text to write. Add text after the extension, or reply to a message with text.",
+        "fa": "⚠️ متنی برای نوشتن نیست. بعد از پسوند متن بنویس، یا روی یه پیام دارای متن ریپلای بزن.",
+    },
+    "file_creating": {"en": "📄 Creating `{name}`...", "fa": "📄 در حال ساخت `{name}`..."},
+    "file_caption": {
+        "en": "📄 **{name}**  ·  {size}",
+        "fa": "📄 **{name}**  ·  {size}",
+    },
+    "file_failed": {"en": "❌ Couldn't create the file: `{e}`", "fa": "❌ ساخت فایل ناموفق بود: `{e}`"},
+
     # .style / .aged / .cartoon
     "style_usage": {
         "en": "🎨 **Style transfer** — Reply to a photo with:\n  `{p}style <style>`\n\nPresets: `vangogh`, `monet`, `anime`, `ghibli`, `pixar`, `disney`, `watercolor`, `oil`, `sketch`, `cyberpunk`, `comic`, `popart`, `lego`, `minecraft`, `pixel`, `vaporwave`, `ukiyoe`, `noir`, `claymation`\n\nPersian: `انیمه`, `گیبلی`, `پیکسار`, `ون‌گوگ`, `آبرنگ`, `رنگ‌روغن`, `سایبرپانک`, `کمیک`, `لگو`, `نوآر` ...\nOr any free-form description (e.g. `{p}style steampunk illustration with brass gears`).",
@@ -762,7 +778,8 @@ I18N = {
             "  `{p}up <link>` — download a file from a link & upload it here\n"
             "     reply + `{p}up` — auto-detect the link in the replied message\n"
             "  `{p}ask <question>` — analyse a PDF/text file & answer questions\n"
-            "     reply to a file + `{p}ask`, then ask follow-ups anytime\n\n"
+            "     reply to a file + `{p}ask`, then ask follow-ups anytime\n"
+            "  `{p}file <ext> <text>` — make a file from text (or reply to a message)\n\n"
             "🔊 **Voice (Text-to-Speech)**\n"
             "  `{p}say <text>` — send text as a natural voice message\n"
             "     reply + `{p}say` — speak the replied message\n"
@@ -842,7 +859,8 @@ I18N = {
             "  `{p}up <لینک>` — دانلود فایل از یه لینک و آپلودش همین‌جا\n"
             "     ریپلای + `{p}up` — تشخیص خودکار لینک از پیام ریپلای‌شده\n"
             "  `{p}ask <سوال>` — تحلیل فایل PDF/متنی و پاسخ به سوالات\n"
-            "     روی فایل ریپلای بزن + `{p}ask`، بعد هر وقت خواستی سوال بپرس\n\n"
+            "     روی فایل ریپلای بزن + `{p}ask`، بعد هر وقت خواستی سوال بپرس\n"
+            "  `{p}file <پسوند> <متن>` — ساخت فایل از متن (یا ریپلای روی یه پیام)\n\n"
             "🔊 **صدا (متن به گفتار)**\n"
             "  `{p}say <متن>` — متن رو به صورت ویس طبیعی می‌فرسته\n"
             "     ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n"
@@ -4179,6 +4197,77 @@ async def cmd_server(event):
         log.error(f"[.server] {e}")
         await msg.edit(t("server_error", e=str(e)[:200]))
     log.info("[.server] status shown")
+
+
+# ═════════ Text → file (.file / .mkfile) ═════════
+def _build_filename(token: str) -> str:
+    """Turn a user token into a safe filename.
+    'py' → 'file.py' · '.json' → 'file.json' · 'notes.md' → 'notes.md'."""
+    token = token.strip().strip('"').strip("'")
+    if "." in token.lstrip("."):
+        name = token
+    else:
+        ext = re.sub(r"[^A-Za-z0-9]", "", token.lstrip("."))[:12] or "txt"
+        name = f"file.{ext}"
+    name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip().strip(".")
+    if not name:
+        name = "file.txt"
+    if "." not in name:
+        name += ".txt"
+    return name[:120]
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}(?:file|mkfile|tofile)(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_mkfile(event):
+    """Create a file from text (or a replied message) with a chosen extension."""
+    arg = (event.pattern_match.group(1) or "").strip()
+    if not arg:
+        await event.edit(t("file_usage", p=CMD_PREFIX))
+        return
+    parts = arg.split(None, 1)
+    token = parts[0]
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    content = rest
+    replied = None
+    if event.is_reply and not content:
+        try:
+            replied = await event.get_reply_message()
+        except Exception:  # noqa: BLE001
+            replied = None
+        if replied:
+            content = replied.raw_text or replied.text or ""
+    if not content:
+        await event.edit(t("file_no_text", p=CMD_PREFIX))
+        return
+
+    filename = _build_filename(token)
+    data = content.encode("utf-8")
+    reply_to = (replied.id if replied else event.reply_to_msg_id)
+    status = await event.edit(t("file_creating", name=filename))
+    tmpdir = tempfile.mkdtemp(prefix="bidar_mk_")
+    try:
+        path = os.path.join(tmpdir, filename)
+        with open(path, "wb") as f:
+            f.write(data)
+        await client.send_file(
+            event.chat_id, path,
+            caption=t("file_caption", name=filename, size=_human_size(len(data))),
+            force_document=True,
+            reply_to=reply_to,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.file] failed: {e}")
+        await status.edit(t("file_failed", e=str(e)[:200]))
+        return
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        await status.delete()
+    except Exception:  # noqa: BLE001
+        pass
+    log.info(f"[.file] created {filename} ({len(data)} bytes)")
 
 
 # ═════════ TL;DR — Link summariser ═════════

@@ -14,7 +14,7 @@ _بیدار = همیشه بیدار، همیشه آنلاین_
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Telethon](https://img.shields.io/badge/Telethon-1.36+-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://github.com/LonamiWebs/Telethon)
-[![Version](https://img.shields.io/badge/Version-1.16.1-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
+[![Version](https://img.shields.io/badge/Version-1.17.0-success?style=flat-square)](https://github.com/DZCT/Bidar/releases)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Persian](https://img.shields.io/badge/Language-فارسی-orange?style=flat-square)](#)
 
@@ -325,7 +325,6 @@ sudo systemctl enable --now bidar
 </div>
 
 ### 🖥 وضعیت سرور (`.server`)
-
 <div dir="rtl">
 
 | دستور | کاربرد |
@@ -333,6 +332,20 @@ sudo systemctl enable --now bidar
 | `.server` (یا `.sys` / `.vps`) | نمایش شیک مصرف منابع سرور مجازی |
 
 > 📊 یه کارت جذاب با نوار پیشرفت نشون می‌ده: **پردازنده** (٪ + تعداد هسته + دما در صورت وجود)، **رم**، **دیسک**، بار سیستم (load)، ترافیک شبکه ↑↓، آپ‌تایم سرور و ربات، سیستم‌عامل/پایتون و نام هاست. (نیازمند `psutil`)
+
+</div>
+
+### 📄 متن → فایل (`.file`)
+
+<div dir="rtl">
+
+| دستور | کاربرد |
+|:---|:---|
+| `.file <پسوند> <متن>` | یه فایل با اون پسوند از متن می‌سازه و می‌فرسته |
+| `.file <نام.پسوند> <متن>` | با نام کامل دلخواه (مثلاً `config.json`) |
+| `.file <پسوند>` (روی یه پیام reply) | متن پیام ریپلای‌شده رو تبدیل به فایل می‌کنه |
+
+> 📝 متن چندخطی هم پشتیبانی می‌شه (بعد از پسوند کدت رو بچسبون). خروجی همیشه به‌صورت فایل (document) و با انکودینگ UTF-8 (سازگار با فارسی) ارسال می‌شه. نام‌های مستعار: `.mkfile` / `.tofile`.
 
 </div>
 
