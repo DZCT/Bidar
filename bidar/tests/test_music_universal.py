@@ -2143,5 +2143,59 @@ class TestCmdMkfile(unittest.IsolatedAsyncioTestCase):
         mc.send_file.assert_not_called()
 
 
+# ────────────────────────────────────────────────────────────────────
+# Checkout link generator (.cp)
+# ────────────────────────────────────────────────────────────────────
+class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
+    def _event(self):
+        status = MagicMock(); status.edit = AsyncMock(); status.delete = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999; ev.out = True; ev.chat_id = 55
+        ev.pattern_match.group.return_value = None
+        ev.edit = AsyncMock(return_value=status)
+        return ev, status
+
+    async def test_success_shows_link(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event()
+        payload = {"status": "ok", "url": "https://checkout.stripe.com/c/pay/cs_live_ABC",
+                   "email": "a@b.com", "password": "Pw@1"}
+        with patch.object(bidar, "_fetch_checkout", return_value=payload):
+            await bidar.cmd_checkout(ev)
+        # last edit must contain the url + credentials
+        last = str(status.edit.await_args_list[-1])
+        self.assertIn("cs_live_ABC", last)
+        self.assertIn("a@b.com", last)
+        self.assertIn("Pw@1", last)
+
+    async def test_bad_status_reports_failure(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event()
+        with patch.object(bidar, "_fetch_checkout", return_value={"status": "error"}):
+            await bidar.cmd_checkout(ev)
+        last = str(status.edit.await_args_list[-1])
+        self.assertIn("error", last.lower())
+
+    async def test_exception_reports_failure(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event()
+        with patch.object(bidar, "_fetch_checkout", side_effect=RuntimeError("conn refused")):
+            await bidar.cmd_checkout(ev)
+        last = str(status.edit.await_args_list[-1])
+        self.assertIn("conn refused", last)
+
+    def test_fetch_parses_json(self):
+        import io as _io
+        body = b'{"status":"ok","url":"https://x","email":"e","password":"p"}'
+        fake = MagicMock()
+        fake.read.return_value = body
+        fake.__enter__ = lambda s: fake
+        fake.__exit__ = lambda s, *a: False
+        with patch.object(bidar.urllib.request, "urlopen", return_value=fake):
+            data = bidar._fetch_checkout()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["url"], "https://x")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

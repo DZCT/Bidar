@@ -102,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -463,6 +463,17 @@ I18N = {
     },
     "file_failed": {"en": "❌ Couldn't create the file: `{e}`", "fa": "❌ ساخت فایل ناموفق بود: `{e}`"},
 
+    # .cp — checkout link generator
+    "cp_generating": {"en": "💳 Generating checkout link...", "fa": "💳 در حال ساخت لینک پرداخت..."},
+    "cp_failed": {
+        "en": "❌ Couldn't generate a checkout link: `{e}`",
+        "fa": "❌ ساخت لینک پرداخت ناموفق بود: `{e}`",
+    },
+    "cp_result": {
+        "en": "💳 **Checkout link ready**\n━━━━━━━━━━━━━━━━\n📧 Email: `{email}`\n🔑 Password: `{pw}`\n\n🔗 [Open Checkout Page]({url})\n\n📋 Link:\n`{url}`",
+        "fa": "💳 **لینک پرداخت آماده شد**\n━━━━━━━━━━━━━━━━\n📧 ایمیل: `{email}`\n🔑 رمز: `{pw}`\n\n🔗 [باز کردن صفحه پرداخت]({url})\n\n📋 لینک:\n`{url}`",
+    },
+
     # .style / .aged / .cartoon
     "style_usage": {
         "en": "🎨 **Style transfer** — Reply to a photo with:\n  `{p}style <style>`\n\nPresets: `vangogh`, `monet`, `anime`, `ghibli`, `pixar`, `disney`, `watercolor`, `oil`, `sketch`, `cyberpunk`, `comic`, `popart`, `lego`, `minecraft`, `pixel`, `vaporwave`, `ukiyoe`, `noir`, `claymation`\n\nPersian: `انیمه`, `گیبلی`, `پیکسار`, `ون‌گوگ`, `آبرنگ`, `رنگ‌روغن`, `سایبرپانک`, `کمیک`, `لگو`, `نوآر` ...\nOr any free-form description (e.g. `{p}style steampunk illustration with brass gears`).",
@@ -802,6 +813,7 @@ I18N = {
             "  `{p}ping` — latency test\n"
             "  `{p}stats` — full stats & settings\n"
             "  `{p}server` — VPS resource usage (CPU / RAM / disk)\n"
+            "  `{p}cp` — generate a checkout link\n"
             "  `{p}id` — chat / user ID\n\n"
             "🔧 **Admin**\n"
             "  `{p}botlang <en|fa>` — change UI language\n"
@@ -883,6 +895,7 @@ I18N = {
             "  `{p}ping` — تست تاخیر (ms)\n"
             "  `{p}stats` — همه آمار و تنظیمات فعلی\n"
             "  `{p}server` — مصرف منابع سرور (پردازنده/رم/دیسک)\n"
+            "  `{p}cp` — ساخت لینک پرداخت (checkout)\n"
             "  `{p}id` — آیدی چت/کاربر\n\n"
             "🔧 **مدیریت**\n"
             "  `{p}botlang <en|fa>` — تغییر زبان رابط\n"
@@ -4197,6 +4210,42 @@ async def cmd_server(event):
         log.error(f"[.server] {e}")
         await msg.edit(t("server_error", e=str(e)[:200]))
     log.info("[.server] status shown")
+
+
+# ═════════ Checkout link generator (.cp) ═════════
+CHECKOUT_API_URL = os.environ.get(
+    "CHECKOUT_API_URL", "http://155.103.70.111:5000/api/chatgpt/gen")
+
+
+def _fetch_checkout() -> dict:
+    """GET the checkout-generator endpoint and return the parsed JSON."""
+    req = urllib.request.Request(
+        CHECKOUT_API_URL, headers={"User-Agent": "Bidar"}, method="GET")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8", errors="replace"))
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}cp$"))
+@owner_only
+async def cmd_checkout(event):
+    """Fetch a fresh checkout link (and generated credentials) from the API."""
+    msg = await event.edit(t("cp_generating"))
+    try:
+        data = await asyncio.to_thread(_fetch_checkout)
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.cp] fetch failed: {e}")
+        await msg.edit(t("cp_failed", e=str(e)[:200]))
+        return
+    if not isinstance(data, dict) or data.get("status") != "ok" or not data.get("url"):
+        reason = (data.get("status") if isinstance(data, dict) else "invalid response")
+        await msg.edit(t("cp_failed", e=str(reason)[:200]))
+        return
+    await msg.edit(
+        t("cp_result", url=data["url"],
+          email=data.get("email", "—"), pw=data.get("password", "—")),
+        link_preview=False,
+    )
+    log.info("[.cp] checkout link generated")
 
 
 # ═════════ Text → file (.file / .mkfile) ═════════

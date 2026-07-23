@@ -125,6 +125,13 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.18.0 — `.cp` Checkout link generator (Completed Jul 2026)
+User request: a `.cp` command that calls their own endpoint (`CHECKOUT_API_URL`, default `http://155.103.70.111:5000/api/chatgpt/gen`) which returns a Stripe checkout link + generated credentials, and displays it.
+- ✅ `.cp` → GET the endpoint (in a thread), parse JSON `{status,url,email,password}`, show a card: clickable "Open Checkout Page" link + copyable raw URL + email/password
+- ✅ Endpoint is configurable via `CHECKOUT_API_URL` env var; graceful failure on bad status / non-JSON / connection error
+- ✅ Bilingual i18n + help menu (`⚙️ System`) + version 1.18.0
+- ✅ Tests: **230 passing** (+4: TestCmdCheckout) + real E2E against the live endpoint (returned a real `cs_live_...` Stripe URL)
+
 ### v1.17.0 — `.file` Text → File (Completed Jun 2026)
 New feature (user request): turn text into a downloadable file with a chosen extension.
 - ✅ `.file <ext> <text>` → creates `file.<ext>` from the text and sends it (as a document)
