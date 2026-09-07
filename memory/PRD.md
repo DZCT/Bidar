@@ -125,6 +125,14 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.19.0 — `.mergetxt` Merge all .txt files of a chat (Completed Jul 2026)
+User request: give a channel/group link and merge all its `.txt` files into one `.txt`.
+- ✅ `.mergetxt <link/@username/id>` resolves the chat (`get_entity` + `_normalize_chat_ref` for links/@user/numeric); `.mergetxt` with no arg uses the current chat
+- ✅ Server-side filtered iteration (`InputMessagesFilterDocument`, oldest→newest), keeps only `.txt` / `text/plain`, downloads each and appends under a `===== FILE n: name =====` header to a temp file (written incrementally, not held in RAM)
+- ✅ Live progress edits every 3s; 500 MB combined cap (flagged with `+`); nice caption (chat title · file count · size); output named `<title>_merged_<n>txt.txt`; graceful bad-link / no-files handling; temp dir cleaned; processing message deleted (guarded)
+- ✅ Alias `.txtmerge`; bilingual i18n + help menu; caption icon 📚 added to `_BOT_MSG_PREFIXES`; version 1.19.0
+- ✅ Tests: **236 passing** (+6: TestNormalizeChatRef, TestCmdMergeTxt — merges 2 files, skips non-txt PDF, handles empty chat)
+
 ### v1.18.0 — `.cp` Checkout link generator (Completed Jul 2026)
 User request: a `.cp` command that calls their own endpoint (`CHECKOUT_API_URL`, default `http://155.103.70.111:5000/api/chatgpt/gen`) which returns a Stripe checkout link + generated credentials, and displays it.
 - ✅ `.cp` → GET the endpoint (in a thread), parse JSON `{status,url,email,password}`, show a card: clickable "Open Checkout Page" link + copyable raw URL + email/password

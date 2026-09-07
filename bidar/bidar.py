@@ -41,7 +41,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.tl.functions.account import UpdateStatusRequest
-from telethon.tl.types import DocumentAttributeAudio
+from telethon.tl.types import DocumentAttributeAudio, InputMessagesFilterDocument
 
 # Optional: AI integration via Emergent Universal Key
 try:
@@ -102,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.18.0"
+VERSION = "1.19.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -474,6 +474,28 @@ I18N = {
         "fa": "💳 **لینک پرداخت آماده شد**\n━━━━━━━━━━━━━━━━\n📧 ایمیل: `{email}`\n🔑 رمز: `{pw}`\n\n🔗 [باز کردن صفحه پرداخت]({url})\n\n📋 لینک:\n`{url}`",
     },
 
+    # .mergetxt — merge all .txt files of a chat
+    "mtxt_usage": {
+        "en": "📚 **Merge .txt files**\n\n  `{p}mergetxt <channel/group link>` — merge all `.txt` files of that chat into one file\n  `{p}mergetxt` (inside a chat) — merge that chat's `.txt` files\n\nExamples:\n  `{p}mergetxt https://t.me/mychannel`\n  `{p}mergetxt @mychannel`",
+        "fa": "📚 **ادغام فایل‌های txt**\n\n  `{p}mergetxt <لینک کانال/گروه>` — همه فایل‌های `.txt` اون چت رو در یک فایل ادغام می‌کنه\n  `{p}mergetxt` (داخل یه چت) — فایل‌های `.txt` همون چت رو ادغام می‌کنه\n\nمثال:\n  `{p}mergetxt https://t.me/mychannel`\n  `{p}mergetxt @mychannel`",
+    },
+    "mtxt_bad_link": {
+        "en": "❌ Couldn't open that chat: `{e}`\nUse a public link/@username, or run `.mergetxt` inside the chat (you must be a member).",
+        "fa": "❌ نتونستم اون چت رو باز کنم: `{e}`\nاز لینک عمومی/@یوزرنیم استفاده کن، یا داخل خود چت `.mergetxt` رو بزن (باید عضو باشی).",
+    },
+    "mtxt_scanning": {"en": "📚 Scanning chat for .txt files...", "fa": "📚 در حال جستجوی فایل‌های txt در چت..."},
+    "mtxt_progress": {"en": "📚 Merging... {n} files ({size})", "fa": "📚 در حال ادغام... {n} فایل ({size})"},
+    "mtxt_none": {
+        "en": "ℹ️ No .txt files found in this chat.",
+        "fa": "ℹ️ هیچ فایل .txt توی این چت پیدا نشد.",
+    },
+    "mtxt_uploading": {"en": "📤 Uploading merged file ({n} files)...", "fa": "📤 در حال آپلود فایل ادغام‌شده ({n} فایل)..."},
+    "mtxt_caption": {
+        "en": "📚 **{title}**\n━━━━━━━━━━━━━━━━\n📄 Merged **{n}** .txt files  ·  {size}",
+        "fa": "📚 **{title}**\n━━━━━━━━━━━━━━━━\n📄 ادغام **{n}** فایل .txt  ·  {size}",
+    },
+    "mtxt_failed": {"en": "❌ Merge failed: `{e}`", "fa": "❌ ادغام ناموفق بود: `{e}`"},
+
     # .style / .aged / .cartoon
     "style_usage": {
         "en": "🎨 **Style transfer** — Reply to a photo with:\n  `{p}style <style>`\n\nPresets: `vangogh`, `monet`, `anime`, `ghibli`, `pixar`, `disney`, `watercolor`, `oil`, `sketch`, `cyberpunk`, `comic`, `popart`, `lego`, `minecraft`, `pixel`, `vaporwave`, `ukiyoe`, `noir`, `claymation`\n\nPersian: `انیمه`, `گیبلی`, `پیکسار`, `ون‌گوگ`, `آبرنگ`, `رنگ‌روغن`, `سایبرپانک`, `کمیک`, `لگو`, `نوآر` ...\nOr any free-form description (e.g. `{p}style steampunk illustration with brass gears`).",
@@ -790,7 +812,8 @@ I18N = {
             "     reply + `{p}up` — auto-detect the link in the replied message\n"
             "  `{p}ask <question>` — analyse a PDF/text file & answer questions\n"
             "     reply to a file + `{p}ask`, then ask follow-ups anytime\n"
-            "  `{p}file <ext> <text>` — make a file from text (or reply to a message)\n\n"
+            "  `{p}file <ext> <text>` — make a file from text (or reply to a message)\n"
+            "  `{p}mergetxt <link>` — merge all .txt files of a channel/group into one file\n\n"
             "🔊 **Voice (Text-to-Speech)**\n"
             "  `{p}say <text>` — send text as a natural voice message\n"
             "     reply + `{p}say` — speak the replied message\n"
@@ -872,7 +895,8 @@ I18N = {
             "     ریپلای + `{p}up` — تشخیص خودکار لینک از پیام ریپلای‌شده\n"
             "  `{p}ask <سوال>` — تحلیل فایل PDF/متنی و پاسخ به سوالات\n"
             "     روی فایل ریپلای بزن + `{p}ask`، بعد هر وقت خواستی سوال بپرس\n"
-            "  `{p}file <پسوند> <متن>` — ساخت فایل از متن (یا ریپلای روی یه پیام)\n\n"
+            "  `{p}file <پسوند> <متن>` — ساخت فایل از متن (یا ریپلای روی یه پیام)\n"
+            "  `{p}mergetxt <لینک>` — ادغام همه فایل‌های .txt یه کانال/گروه در یک فایل\n\n"
             "🔊 **صدا (متن به گفتار)**\n"
             "  `{p}say <متن>` — متن رو به صورت ویس طبیعی می‌فرسته\n"
             "     ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n"
@@ -4248,6 +4272,108 @@ async def cmd_checkout(event):
     log.info("[.cp] checkout link generated")
 
 
+# ═════════ Merge all .txt files of a chat (.mergetxt) ═════════
+MAX_MERGE_BYTES = 500 * 1024 * 1024  # 500 MB combined cap
+
+
+def _normalize_chat_ref(ref: str):
+    """Turn a user-supplied chat reference into something get_entity accepts."""
+    ref = ref.strip()
+    if re.fullmatch(r"-?\d+", ref):
+        return int(ref)
+    m = re.search(r"(?:t\.me/|telegram\.me/)(\+?[\w]+)", ref, re.I)
+    if m:
+        return m.group(1)
+    return ref.lstrip("@") if ref.startswith("@") else ref
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}(?:mergetxt|txtmerge)(?:\s+([\s\S]+))?$"))
+@owner_only
+async def cmd_mergetxt(event):
+    """Merge every .txt file of a channel/group into a single .txt file."""
+    arg = (event.pattern_match.group(1) or "").strip()
+    if arg:
+        try:
+            target = await client.get_entity(_normalize_chat_ref(arg))
+        except Exception as e:  # noqa: BLE001
+            await event.edit(t("mtxt_bad_link", e=str(e)[:150]))
+            return
+    else:
+        try:
+            target = await event.get_input_chat()
+        except Exception as e:  # noqa: BLE001
+            await event.edit(t("mtxt_usage", p=CMD_PREFIX))
+            return
+
+    status = await event.edit(t("mtxt_scanning"))
+    title = getattr(target, "title", None) or getattr(target, "username", None) or "chat"
+    tmpdir = tempfile.mkdtemp(prefix="bidar_mtxt_")
+    out_path = os.path.join(tmpdir, "merged.txt")
+    count = 0
+    total = 0
+    truncated = False
+    last_edit = 0.0
+    try:
+        with open(out_path, "w", encoding="utf-8") as out:
+            out.write(f"# Merged .txt files from: {title}\n"
+                      f"# Generated by Bidar on {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            async for msg in client.iter_messages(
+                    target, filter=InputMessagesFilterDocument, reverse=True):
+                f = getattr(msg, "file", None)
+                if not f:
+                    continue
+                name = f.name or ""
+                mime = (f.mime_type or "").lower()
+                if not (name.lower().endswith(".txt") or mime == "text/plain"):
+                    continue
+                try:
+                    data = await client.download_media(msg, file=bytes)
+                except Exception:  # noqa: BLE001
+                    continue
+                if not isinstance(data, bytes) or not data:
+                    continue
+                count += 1
+                out.write(f"\n\n===== FILE {count}: {name or 'untitled.txt'} =====\n")
+                out.write(data.decode("utf-8", errors="replace"))
+                total += len(data)
+                if total > MAX_MERGE_BYTES:
+                    truncated = True
+                    break
+                now = time.time()
+                if now - last_edit >= 3:
+                    last_edit = now
+                    await _safe_edit(status, t("mtxt_progress", n=count,
+                                               size=_human_size(total)))
+        if count == 0:
+            await status.edit(t("mtxt_none"))
+            return
+
+        safe_title = re.sub(r'[\\/:*?"<>|]+', "_", str(title)).strip() or "chat"
+        final_name = f"{safe_title[:50]}_merged_{count}txt.txt"
+        final_path = os.path.join(tmpdir, final_name)
+        os.rename(out_path, final_path)
+
+        await _safe_edit(status, t("mtxt_uploading", n=count))
+        size_str = _human_size(total) + ("+" if truncated else "")
+        await client.send_file(
+            event.chat_id, final_path,
+            caption=t("mtxt_caption", title=title, n=count, size=size_str),
+            force_document=True,
+            reply_to=event.reply_to_msg_id,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.mergetxt] failed: {e}")
+        await _safe_edit(status, t("mtxt_failed", e=str(e)[:200]))
+        return
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    try:
+        await status.delete()
+    except Exception:  # noqa: BLE001
+        pass
+    log.info(f"[.mergetxt] merged {count} txt files from {title} ({_human_size(total)})")
+
+
 # ═════════ Text → file (.file / .mkfile) ═════════
 def _build_filename(token: str) -> str:
     """Turn a user token into a safe filename.
@@ -4835,7 +4961,7 @@ _BOT_MSG_PREFIXES = (
     # Captions / fresh messages sent by other features (search, image tools,
     # tldr, sum, ocr, uploader) — may themselves contain music URLs and must be ignored.
     "🔍", "🔒", "🎨", "🖼", "👴", "🧒", "📰", "🌐", "📦", "▶️", "📊", "📖",
-    "📥", "🎬", "📄", "🎭", "🖥",
+    "📥", "🎬", "📄", "🎭", "🖥", "📚",
 )
 
 

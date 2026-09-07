@@ -2197,5 +2197,101 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["url"], "https://x")
 
 
+# ────────────────────────────────────────────────────────────────────
+# Merge .txt files of a chat (.mergetxt)
+# ────────────────────────────────────────────────────────────────────
+class TestNormalizeChatRef(unittest.TestCase):
+    def test_username(self):
+        self.assertEqual(bidar._normalize_chat_ref("@mychannel"), "mychannel")
+        self.assertEqual(bidar._normalize_chat_ref("mychannel"), "mychannel")
+
+    def test_link(self):
+        self.assertEqual(bidar._normalize_chat_ref("https://t.me/mychannel"), "mychannel")
+        self.assertEqual(bidar._normalize_chat_ref("t.me/mychannel"), "mychannel")
+
+    def test_numeric_id(self):
+        self.assertEqual(bidar._normalize_chat_ref("-1001234567890"), -1001234567890)
+
+
+class TestCmdMergeTxt(unittest.IsolatedAsyncioTestCase):
+    def _event(self, raw=""):
+        status = MagicMock(); status.delete = AsyncMock(); status.edit = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999; ev.out = True; ev.chat_id = 55; ev.reply_to_msg_id = None
+        ev.pattern_match.group.return_value = raw
+        ev.edit = AsyncMock(return_value=status)
+        return ev, status
+
+    def _txt_msg(self, name, content):
+        m = MagicMock()
+        m.file = MagicMock(); m.file.name = name; m.file.mime_type = "text/plain"
+        m._content = content
+        return m
+
+    async def _run(self, raw, messages):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(raw=raw)
+        target = MagicMock(); target.title = "My Channel"; target.username = "mychan"
+        sent = {}
+
+        async def fake_send_file(chat_id, path, **kw):
+            with open(path, "rb") as f:
+                sent["content"] = f.read().decode("utf-8")
+            sent["name"] = os.path.basename(path)
+            sent["caption"] = kw.get("caption")
+
+        async def fake_iter(entity, filter=None, reverse=False):
+            for m in messages:
+                yield m
+
+        async def fake_download(m, file=None):
+            return m._content.encode("utf-8")
+
+        with patch.object(bidar, "client") as mc:
+            mc.get_entity = AsyncMock(return_value=target)
+            mc.iter_messages = fake_iter
+            mc.download_media = AsyncMock(side_effect=fake_download)
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            await bidar.cmd_mergetxt(ev)
+        return sent, status
+
+    async def test_merges_txt_files(self):
+        msgs = [self._txt_msg("a.txt", "AAA content"),
+                self._txt_msg("b.txt", "BBB content")]
+        sent, status = await self._run("https://t.me/mychan", msgs)
+        self.assertIn("AAA content", sent["content"])
+        self.assertIn("BBB content", sent["content"])
+        self.assertIn("FILE 1: a.txt", sent["content"])
+        self.assertIn("FILE 2: b.txt", sent["content"])
+        self.assertTrue(sent["name"].endswith(".txt"))
+        self.assertIn("2txt", sent["name"])
+        status.delete.assert_awaited_once()
+
+    async def test_skips_non_txt(self):
+        pdf = MagicMock(); pdf.file = MagicMock()
+        pdf.file.name = "doc.pdf"; pdf.file.mime_type = "application/pdf"
+        pdf._content = "should be skipped"
+        txt = self._txt_msg("keep.txt", "keep me")
+        sent, status = await self._run("@mychan", [pdf, txt])
+        self.assertIn("keep me", sent["content"])
+        self.assertNotIn("should be skipped", sent["content"])
+        self.assertIn("1txt", sent["name"])
+
+    async def test_no_txt_files(self):
+        bidar.OWNER_ID = 999
+        ev, status = self._event(raw="@empty")
+        target = MagicMock(); target.title = "Empty"; target.username = "empty"
+        async def fake_iter(entity, filter=None, reverse=False):
+            if False:
+                yield None
+        with patch.object(bidar, "client") as mc:
+            mc.get_entity = AsyncMock(return_value=target)
+            mc.iter_messages = fake_iter
+            mc.send_file = AsyncMock()
+            await bidar.cmd_mergetxt(ev)
+        mc.send_file.assert_not_called()
+        status.edit.assert_awaited()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
