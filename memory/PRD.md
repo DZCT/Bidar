@@ -135,6 +135,7 @@ User request: rename `.cp` to `.fd`, make it usable by ANY member in whitelisted
 
 ### v1.20.1 — `.fd` → `.fc` rename (Completed Sep 2026)
 User typo correction: command renamed `.fd` → `.fc`. All identifiers renamed (`fc_*` i18n keys, `_fetch_fc_checkout`, `_fc_can_use`, env `FC_CHECKOUT_URL`, pattern `^.fc$`, help text, logs, tests). Behavior unchanged. Suite: 238 passed. Live self-test: owner/member-in-Allow-group OK, non-allowed ignored.
+- ✅ Follow-up: `.fc` delivered result card is now ALWAYS English (fa variant mirrors en); generating/failed messages stay bilingual
 - ✅ Tests: **238 passing** (rewrote TestCmdCheckout: owner success, member-in-allow-group allowed, member-in-non-allow ignored, failure/none handling, Location-header parsing) + real E2E against the live FreeCAD endpoint (all 3 access scenarios)
 
 ### v1.19.0 — `.mergetxt` Merge all .txt files of a chat (Completed Jul 2026)

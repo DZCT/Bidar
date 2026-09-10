@@ -481,15 +481,16 @@ I18N = {
             "📋 Or tap to copy:\n"
             "`{url}`"
         ),
+        # Delivered card is always English (per user request)
         "fa": (
             "┏━━━━━━━━━━━━━━━━━━━━━┓\n"
-            "   💳  **پرداخت استرایپ**\n"
+            "   💳  **STRIPE CHECKOUT**\n"
             "┗━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-            "✅ لینک پرداخت امن تو آماده شد!\n\n"
-            "🔗  **➤ [ باز کردن صفحه پرداخت ]({url})**\n\n"
+            "✅ Your secure payment link is ready!\n\n"
+            "🔗  **➤ [ OPEN CHECKOUT PAGE ]({url})**\n\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            "🔒 _امن‌شده توسط Stripe_\n"
-            "📋 یا برای کپی، روی لینک زیر بزن:\n"
+            "🔒 _Secured by Stripe_\n"
+            "📋 Or tap to copy:\n"
             "`{url}`"
         ),
     },
