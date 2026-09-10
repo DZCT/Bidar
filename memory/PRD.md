@@ -125,6 +125,15 @@ Root causes & fixes — all live E2E verified with the user's exact URLs:
 - ✅ Platform label renamed to "YouTube Music" in audio captions.
 - ✅ Regression test (`test_youtube_music_only`) added.
 
+### v1.20.0 — `.cp` → `.fd`, public in Allow groups, FreeCAD endpoint, prettier card (Completed Sep 2026)
+User request: rename `.cp` to `.fd`, make it usable by ANY member in whitelisted (Allow) groups, switch to the FreeCAD endpoint, and prettify the checkout message.
+- ✅ Renamed `.cp` → `.fd`; endpoint now `FD_CHECKOUT_URL` (default `https://www.freecad.org/stripe-checkout-session.php?amount=1`, env-overridable)
+- ✅ Endpoint returns a **303 redirect**; `_fetch_fd_checkout` uses a no-follow opener (`_NoRedirect`) and reads the Stripe URL from the `Location` header (handles both response & HTTPError paths)
+- ✅ **Access control**: NOT `@owner_only`. Listens to all `NewMessage`; `_fd_can_use` allows the **owner anywhere** OR **any member inside an Allow-whitelisted group** (reuses `_is_chat_allowed`); silently ignored elsewhere. Uses `event.reply()` (not edit) so it works for other members' messages too.
+- ✅ **Redesigned card**: framed header, ✅ confirmation, big clickable "OPEN CHECKOUT PAGE" link, 🔒 "Secured by Stripe" note, and a copyable raw URL — bilingual.
+- ✅ Help menu + version 1.20.0
+- ✅ Tests: **238 passing** (rewrote TestCmdCheckout: owner success, member-in-allow-group allowed, member-in-non-allow ignored, failure/none handling, Location-header parsing) + real E2E against the live FreeCAD endpoint (all 3 access scenarios)
+
 ### v1.19.0 — `.mergetxt` Merge all .txt files of a chat (Completed Jul 2026)
 User request: give a channel/group link and merge all its `.txt` files into one `.txt`.
 - ✅ `.mergetxt <link/@username/id>` resolves the chat (`get_entity` + `_normalize_chat_ref` for links/@user/numeric); `.mergetxt` with no arg uses the current chat

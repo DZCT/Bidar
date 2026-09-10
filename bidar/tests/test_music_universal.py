@@ -2146,55 +2146,74 @@ class TestCmdMkfile(unittest.IsolatedAsyncioTestCase):
 # ────────────────────────────────────────────────────────────────────
 # Checkout link generator (.cp)
 # ────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────
+# FreeCAD Stripe checkout link (.fd) — usable by members in Allow groups
+# ────────────────────────────────────────────────────────────────────
 class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
-    def _event(self):
+    def setUp(self):
+        bidar.OWNER_ID = 999
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+
+    def _event(self, sender=999, is_private=True, chat_id=999):
         status = MagicMock(); status.edit = AsyncMock(); status.delete = AsyncMock()
         ev = MagicMock()
-        ev.sender_id = 999; ev.out = True; ev.chat_id = 55
+        ev.sender_id = sender; ev.chat_id = chat_id; ev.is_private = is_private
         ev.pattern_match.group.return_value = None
-        ev.edit = AsyncMock(return_value=status)
+        ev.reply = AsyncMock(return_value=status)
         return ev, status
 
-    async def test_success_shows_link(self):
-        bidar.OWNER_ID = 999
-        ev, status = self._event()
-        payload = {"status": "ok", "url": "https://checkout.stripe.com/c/pay/cs_live_ABC",
-                   "email": "a@b.com", "password": "Pw@1"}
-        with patch.object(bidar, "_fetch_checkout", return_value=payload):
+    async def test_owner_success_shows_link(self):
+        ev, status = self._event(sender=999)
+        url = "https://checkout.stripe.com/c/pay/cs_live_ABC#xyz"
+        with patch.object(bidar, "_fetch_fd_checkout", return_value=url):
             await bidar.cmd_checkout(ev)
-        # last edit must contain the url + credentials
         last = str(status.edit.await_args_list[-1])
         self.assertIn("cs_live_ABC", last)
-        self.assertIn("a@b.com", last)
-        self.assertIn("Pw@1", last)
 
-    async def test_bad_status_reports_failure(self):
-        bidar.OWNER_ID = 999
-        ev, status = self._event()
-        with patch.object(bidar, "_fetch_checkout", return_value={"status": "error"}):
+    async def test_member_in_allow_group_can_use(self):
+        # non-owner sender, but chat is whitelisted → allowed
+        bidar.config["allowed_groups"] = [-1001234567890]
+        ev, status = self._event(sender=555, is_private=False, chat_id=-1001234567890)
+        with patch.object(bidar, "_fetch_fd_checkout",
+                          return_value="https://checkout.stripe.com/c/pay/cs_live_X"):
             await bidar.cmd_checkout(ev)
-        last = str(status.edit.await_args_list[-1])
-        self.assertIn("error", last.lower())
+        ev.reply.assert_awaited()  # responded
+        self.assertIn("cs_live_X", str(status.edit.await_args_list[-1]))
 
-    async def test_exception_reports_failure(self):
-        bidar.OWNER_ID = 999
-        ev, status = self._event()
-        with patch.object(bidar, "_fetch_checkout", side_effect=RuntimeError("conn refused")):
+    async def test_member_in_non_allow_group_ignored(self):
+        # non-owner, chat NOT whitelisted → command ignored (no reply)
+        bidar.config["allowed_groups"] = []
+        ev, status = self._event(sender=555, is_private=False, chat_id=-100999)
+        with patch.object(bidar, "_fetch_fd_checkout",
+                          return_value="https://checkout.stripe.com/c/pay/cs_live_X"):
             await bidar.cmd_checkout(ev)
-        last = str(status.edit.await_args_list[-1])
-        self.assertIn("conn refused", last)
+        ev.reply.assert_not_awaited()  # ignored entirely
 
-    def test_fetch_parses_json(self):
-        import io as _io
-        body = b'{"status":"ok","url":"https://x","email":"e","password":"p"}'
-        fake = MagicMock()
-        fake.read.return_value = body
-        fake.__enter__ = lambda s: fake
-        fake.__exit__ = lambda s, *a: False
-        with patch.object(bidar.urllib.request, "urlopen", return_value=fake):
-            data = bidar._fetch_checkout()
-        self.assertEqual(data["status"], "ok")
-        self.assertEqual(data["url"], "https://x")
+    async def test_failure_reports(self):
+        ev, status = self._event(sender=999)
+        with patch.object(bidar, "_fetch_fd_checkout", side_effect=RuntimeError("timeout")):
+            await bidar.cmd_checkout(ev)
+        self.assertIn("timeout", str(status.edit.await_args_list[-1]))
+
+    async def test_no_link_reports_failure(self):
+        ev, status = self._event(sender=999)
+        with patch.object(bidar, "_fetch_fd_checkout", return_value=None):
+            await bidar.cmd_checkout(ev)
+        status.edit.assert_awaited()
+
+    def test_fetch_reads_location_header(self):
+        loc = "https://checkout.stripe.com/c/pay/cs_live_ZZZ#frag"
+        err = MagicMock()
+        err.headers = {"Location": loc}
+        real_HTTPError = bidar.urllib.error.HTTPError
+
+        class FakeOpener:
+            def open(self, req, timeout=None):
+                raise real_HTTPError("u", 303, "See Other", err.headers, None)
+
+        with patch.object(bidar.urllib.request, "build_opener", return_value=FakeOpener()):
+            got = bidar._fetch_fd_checkout()
+        self.assertEqual(got, loc)
 
 
 # ────────────────────────────────────────────────────────────────────

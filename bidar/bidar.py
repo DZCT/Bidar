@@ -102,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.19.0"
+VERSION = "1.20.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -463,15 +463,35 @@ I18N = {
     },
     "file_failed": {"en": "❌ Couldn't create the file: `{e}`", "fa": "❌ ساخت فایل ناموفق بود: `{e}`"},
 
-    # .cp — checkout link generator
-    "cp_generating": {"en": "💳 Generating checkout link...", "fa": "💳 در حال ساخت لینک پرداخت..."},
-    "cp_failed": {
-        "en": "❌ Couldn't generate a checkout link: `{e}`",
-        "fa": "❌ ساخت لینک پرداخت ناموفق بود: `{e}`",
+    # .fd — FreeCAD Stripe checkout link (usable by members in Allow groups)
+    "fd_generating": {"en": "💳 Generating your checkout link...", "fa": "💳 در حال ساخت لینک پرداختت..."},
+    "fd_failed": {
+        "en": "❌ Couldn't generate a checkout link: `{e}`\nPlease try again in a moment.",
+        "fa": "❌ ساخت لینک پرداخت ناموفق بود: `{e}`\nلطفاً چند لحظه دیگه دوباره امتحان کن.",
     },
-    "cp_result": {
-        "en": "💳 **Checkout link ready**\n━━━━━━━━━━━━━━━━\n📧 Email: `{email}`\n🔑 Password: `{pw}`\n\n🔗 [Open Checkout Page]({url})\n\n📋 Link:\n`{url}`",
-        "fa": "💳 **لینک پرداخت آماده شد**\n━━━━━━━━━━━━━━━━\n📧 ایمیل: `{email}`\n🔑 رمز: `{pw}`\n\n🔗 [باز کردن صفحه پرداخت]({url})\n\n📋 لینک:\n`{url}`",
+    "fd_result": {
+        "en": (
+            "┏━━━━━━━━━━━━━━━━━━━━━┓\n"
+            "   💳  **STRIPE CHECKOUT**\n"
+            "┗━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            "✅ Your secure payment link is ready!\n\n"
+            "🔗  **➤ [ OPEN CHECKOUT PAGE ]({url})**\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "🔒 _Secured by Stripe_\n"
+            "📋 Or tap to copy:\n"
+            "`{url}`"
+        ),
+        "fa": (
+            "┏━━━━━━━━━━━━━━━━━━━━━┓\n"
+            "   💳  **پرداخت استرایپ**\n"
+            "┗━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            "✅ لینک پرداخت امن تو آماده شد!\n\n"
+            "🔗  **➤ [ باز کردن صفحه پرداخت ]({url})**\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "🔒 _امن‌شده توسط Stripe_\n"
+            "📋 یا برای کپی، روی لینک زیر بزن:\n"
+            "`{url}`"
+        ),
     },
 
     # .mergetxt — merge all .txt files of a chat
@@ -836,7 +856,7 @@ I18N = {
             "  `{p}ping` — latency test\n"
             "  `{p}stats` — full stats & settings\n"
             "  `{p}server` — VPS resource usage (CPU / RAM / disk)\n"
-            "  `{p}cp` — generate a checkout link\n"
+            "  `{p}fd` — get a Stripe checkout link (works for members in Allow groups)\n"
             "  `{p}id` — chat / user ID\n\n"
             "🔧 **Admin**\n"
             "  `{p}botlang <en|fa>` — change UI language\n"
@@ -919,7 +939,7 @@ I18N = {
             "  `{p}ping` — تست تاخیر (ms)\n"
             "  `{p}stats` — همه آمار و تنظیمات فعلی\n"
             "  `{p}server` — مصرف منابع سرور (پردازنده/رم/دیسک)\n"
-            "  `{p}cp` — ساخت لینک پرداخت (checkout)\n"
+            "  `{p}fd` — گرفتن لینک پرداخت استرایپ (برای اعضای گروه‌های Allow هم کار می‌کنه)\n"
             "  `{p}id` — آیدی چت/کاربر\n\n"
             "🔧 **مدیریت**\n"
             "  `{p}botlang <en|fa>` — تغییر زبان رابط\n"
@@ -4236,40 +4256,61 @@ async def cmd_server(event):
     log.info("[.server] status shown")
 
 
-# ═════════ Checkout link generator (.cp) ═════════
-CHECKOUT_API_URL = os.environ.get(
-    "CHECKOUT_API_URL", "http://155.103.70.111:5000/api/chatgpt/gen")
+# ═════════ FreeCAD Stripe checkout link (.fd) ═════════
+# Available to the owner anywhere, and to ANY member in whitelisted (Allow) groups.
+FD_CHECKOUT_URL = os.environ.get(
+    "FD_CHECKOUT_URL", "https://www.freecad.org/stripe-checkout-session.php?amount=1")
 
 
-def _fetch_checkout() -> dict:
-    """GET the checkout-generator endpoint and return the parsed JSON."""
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirect handler that refuses to follow, so we can read the Location header."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+def _fetch_fd_checkout() -> str | None:
+    """Hit the FreeCAD endpoint and return the Stripe checkout URL from the
+    303 redirect's Location header (without following the redirect)."""
     req = urllib.request.Request(
-        CHECKOUT_API_URL, headers={"User-Agent": "Bidar"}, method="GET")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}cp$"))
-@owner_only
-async def cmd_checkout(event):
-    """Fetch a fresh checkout link (and generated credentials) from the API."""
-    msg = await event.edit(t("cp_generating"))
-    try:
-        data = await asyncio.to_thread(_fetch_checkout)
-    except Exception as e:  # noqa: BLE001
-        log.error(f"[.cp] fetch failed: {e}")
-        await msg.edit(t("cp_failed", e=str(e)[:200]))
-        return
-    if not isinstance(data, dict) or data.get("status") != "ok" or not data.get("url"):
-        reason = (data.get("status") if isinstance(data, dict) else "invalid response")
-        await msg.edit(t("cp_failed", e=str(reason)[:200]))
-        return
-    await msg.edit(
-        t("cp_result", url=data["url"],
-          email=data.get("email", "—"), pw=data.get("password", "—")),
-        link_preview=False,
+        FD_CHECKOUT_URL,
+        headers={"User-Agent": "Mozilla/5.0", "Accept": "*/*"},
+        method="GET",
     )
-    log.info("[.cp] checkout link generated")
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        resp = opener.open(req, timeout=30)
+        loc = resp.headers.get("Location")
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location")
+    if not loc:
+        return None
+    return loc if loc.startswith("http") else urllib.parse.urljoin(FD_CHECKOUT_URL, loc)
+
+
+def _fd_can_use(event) -> bool:
+    """Owner (anywhere) or any member inside a whitelisted (Allow) group."""
+    if _is_owner(event):
+        return True
+    return bool(not event.is_private and _is_chat_allowed(event.chat_id))
+
+
+@client.on(events.NewMessage(pattern=rf"^\{CMD_PREFIX}fd$"))
+async def cmd_checkout(event):
+    """Fetch a Stripe checkout link. Usable by anyone in whitelisted groups."""
+    if not _fd_can_use(event):
+        return
+    status = await event.reply(t("fd_generating"))
+    try:
+        url = await asyncio.to_thread(_fetch_fd_checkout)
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.fd] fetch failed: {e}")
+        await status.edit(t("fd_failed", e=str(e)[:200]))
+        return
+    if not url or "checkout.stripe.com" not in url:
+        await status.edit(t("fd_failed", e="no checkout link returned"))
+        return
+    await status.edit(t("fd_result", url=url), link_preview=False)
+    log.info(f"[.fd] checkout link generated by {event.sender_id} in chat {event.chat_id}")
 
 
 # ═════════ Merge all .txt files of a chat (.mergetxt) ═════════
