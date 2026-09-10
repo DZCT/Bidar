@@ -2147,7 +2147,7 @@ class TestCmdMkfile(unittest.IsolatedAsyncioTestCase):
 # Checkout link generator (.cp)
 # ────────────────────────────────────────────────────────────────────
 # ────────────────────────────────────────────────────────────────────
-# FreeCAD Stripe checkout link (.fd) — usable by members in Allow groups
+# FreeCAD Stripe checkout link (.fc) — usable by members in Allow groups
 # ────────────────────────────────────────────────────────────────────
 class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -2165,7 +2165,7 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
     async def test_owner_success_shows_link(self):
         ev, status = self._event(sender=999)
         url = "https://checkout.stripe.com/c/pay/cs_live_ABC#xyz"
-        with patch.object(bidar, "_fetch_fd_checkout", return_value=url):
+        with patch.object(bidar, "_fetch_fc_checkout", return_value=url):
             await bidar.cmd_checkout(ev)
         last = str(status.edit.await_args_list[-1])
         self.assertIn("cs_live_ABC", last)
@@ -2174,7 +2174,7 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
         # non-owner sender, but chat is whitelisted → allowed
         bidar.config["allowed_groups"] = [-1001234567890]
         ev, status = self._event(sender=555, is_private=False, chat_id=-1001234567890)
-        with patch.object(bidar, "_fetch_fd_checkout",
+        with patch.object(bidar, "_fetch_fc_checkout",
                           return_value="https://checkout.stripe.com/c/pay/cs_live_X"):
             await bidar.cmd_checkout(ev)
         ev.reply.assert_awaited()  # responded
@@ -2184,20 +2184,20 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
         # non-owner, chat NOT whitelisted → command ignored (no reply)
         bidar.config["allowed_groups"] = []
         ev, status = self._event(sender=555, is_private=False, chat_id=-100999)
-        with patch.object(bidar, "_fetch_fd_checkout",
+        with patch.object(bidar, "_fetch_fc_checkout",
                           return_value="https://checkout.stripe.com/c/pay/cs_live_X"):
             await bidar.cmd_checkout(ev)
         ev.reply.assert_not_awaited()  # ignored entirely
 
     async def test_failure_reports(self):
         ev, status = self._event(sender=999)
-        with patch.object(bidar, "_fetch_fd_checkout", side_effect=RuntimeError("timeout")):
+        with patch.object(bidar, "_fetch_fc_checkout", side_effect=RuntimeError("timeout")):
             await bidar.cmd_checkout(ev)
         self.assertIn("timeout", str(status.edit.await_args_list[-1]))
 
     async def test_no_link_reports_failure(self):
         ev, status = self._event(sender=999)
-        with patch.object(bidar, "_fetch_fd_checkout", return_value=None):
+        with patch.object(bidar, "_fetch_fc_checkout", return_value=None):
             await bidar.cmd_checkout(ev)
         status.edit.assert_awaited()
 
@@ -2212,7 +2212,7 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
                 raise real_HTTPError("u", 303, "See Other", err.headers, None)
 
         with patch.object(bidar.urllib.request, "build_opener", return_value=FakeOpener()):
-            got = bidar._fetch_fd_checkout()
+            got = bidar._fetch_fc_checkout()
         self.assertEqual(got, loc)
 
 
