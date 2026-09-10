@@ -4300,7 +4300,11 @@ async def cmd_checkout(event):
     """Fetch a Stripe checkout link. Usable by anyone in whitelisted groups."""
     if not _fc_can_use(event):
         return
-    status = await event.reply(t("fc_generating"))
+    status = await event.respond(t("fc_generating"))
+    try:
+        await event.delete()  # remove the ".fc" command message; keep only the result
+    except Exception:  # noqa: BLE001
+        pass
     try:
         url = await asyncio.to_thread(_fetch_fc_checkout)
     except Exception as e:  # noqa: BLE001

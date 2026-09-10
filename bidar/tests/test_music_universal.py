@@ -2159,7 +2159,8 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
         ev = MagicMock()
         ev.sender_id = sender; ev.chat_id = chat_id; ev.is_private = is_private
         ev.pattern_match.group.return_value = None
-        ev.reply = AsyncMock(return_value=status)
+        ev.respond = AsyncMock(return_value=status)
+        ev.delete = AsyncMock()
         return ev, status
 
     async def test_owner_success_shows_link(self):
@@ -2169,6 +2170,7 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
             await bidar.cmd_checkout(ev)
         last = str(status.edit.await_args_list[-1])
         self.assertIn("cs_live_ABC", last)
+        ev.delete.assert_awaited()  # original ".fc" command removed
 
     async def test_member_in_allow_group_can_use(self):
         # non-owner sender, but chat is whitelisted → allowed
@@ -2177,7 +2179,7 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
         with patch.object(bidar, "_fetch_fc_checkout",
                           return_value="https://checkout.stripe.com/c/pay/cs_live_X"):
             await bidar.cmd_checkout(ev)
-        ev.reply.assert_awaited()  # responded
+        ev.respond.assert_awaited()  # responded
         self.assertIn("cs_live_X", str(status.edit.await_args_list[-1]))
 
     async def test_member_in_non_allow_group_ignored(self):
@@ -2187,7 +2189,7 @@ class TestCmdCheckout(unittest.IsolatedAsyncioTestCase):
         with patch.object(bidar, "_fetch_fc_checkout",
                           return_value="https://checkout.stripe.com/c/pay/cs_live_X"):
             await bidar.cmd_checkout(ev)
-        ev.reply.assert_not_awaited()  # ignored entirely
+        ev.respond.assert_not_awaited()  # ignored entirely
 
     async def test_failure_reports(self):
         ev, status = self._event(sender=999)
