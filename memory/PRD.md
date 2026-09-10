@@ -136,6 +136,16 @@ User request: rename `.cp` to `.fd`, make it usable by ANY member in whitelisted
 ### v1.20.1 — `.fd` → `.fc` rename (Completed Sep 2026)
 User typo correction: command renamed `.fd` → `.fc`. All identifiers renamed (`fc_*` i18n keys, `_fetch_fc_checkout`, `_fc_can_use`, env `FC_CHECKOUT_URL`, pattern `^.fc$`, help text, logs, tests). Behavior unchanged. Suite: 238 passed. Live self-test: owner/member-in-Allow-group OK, non-allowed ignored.
 - ✅ Follow-up: `.fc` delivered result card is now ALWAYS English (fa variant mirrors en); generating/failed messages stay bilingual
+- ✅ Follow-up: `.fc` now deletes the original command message (best-effort) and keeps only the delivered checkout card (uses `event.respond` + `event.delete`)
+
+### v1.21.0 — `.split` large-file splitter (Completed Sep 2026)
+User request: split a large (e.g. 4 GB) `.txt` file into parts of a chosen size, because phones can't open/split it.
+- ✅ New owner-only command `.split <size>` — **reply to any file** to split it (e.g. `.split 100mb`, `.split 1gb`, `.split 250kb`; bare number = MB)
+- ✅ `_parse_size_arg` parses b/kb/mb/gb; min 1 KB, max 2 GB per part (Telegram non-premium upload limit)
+- ✅ Streams the source to disk via `download_media(file=path, progress_callback=...)` (never loads into RAM — handles multi-GB files), then splits **at line boundaries** (no line is ever cut). Oversized single lines get their own part.
+- ✅ Parts named `<base>_part1<ext>`, `_part2<ext>`... sent in order, each replying to the source message; each part uploaded then deleted from disk to keep footprint low.
+- ✅ Live progress: downloading %, splitting count, per-part upload, final done summary. Bilingual i18n (`split_*`). Help menu + version 1.21.0.
+- ✅ Suite: 244 passed. E2E self-test: 5 MB / 82k-line dump split into 1 MB parts → all ≤1 MB, all end on a newline, reassembly == original.
 - ✅ Tests: **238 passing** (rewrote TestCmdCheckout: owner success, member-in-allow-group allowed, member-in-non-allow ignored, failure/none handling, Location-header parsing) + real E2E against the live FreeCAD endpoint (all 3 access scenarios)
 
 ### v1.19.0 — `.mergetxt` Merge all .txt files of a chat (Completed Jul 2026)

@@ -102,7 +102,7 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.20.1"
+VERSION = "1.21.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 
@@ -517,6 +517,42 @@ I18N = {
     },
     "mtxt_failed": {"en": "❌ Merge failed: `{e}`", "fa": "❌ ادغام ناموفق بود: `{e}`"},
 
+    # .split — split a large (txt) file into size-limited parts
+    "split_usage": {
+        "en": "✂️ **Split a file** — Reply to a file with:\n  `{p}split <size>`\n\nExamples:\n  `{p}split 100mb`\n  `{p}split 1gb`\n  `{p}split 250kb`\n\n_Splits at line boundaries (no line is cut). Each part is ≤ the size you choose._",
+        "fa": "✂️ **تقسیم فایل** — روی یه فایل ریپلای کن و بزن:\n  `{p}split <حجم>`\n\nمثال:\n  `{p}split 100mb`\n  `{p}split 1gb`\n  `{p}split 250kb`\n\n_برش سر خط کامل انجام می‌شه (هیچ خطی نصفه نمی‌شه). حجم هر تیکه ≤ حجمیه که انتخاب می‌کنی._",
+    },
+    "split_no_file": {
+        "en": "❌ Reply to a file with `{p}split <size>` (e.g. `{p}split 100mb`).",
+        "fa": "❌ روی یه فایل ریپلای کن و بزن `{p}split <حجم>` (مثلاً `{p}split 100mb`).",
+    },
+    "split_bad_size": {
+        "en": "❌ Invalid size. Use something like `100mb`, `1gb`, or `250kb` (min 1 KB, max {max}).",
+        "fa": "❌ حجم نامعتبره. یه چیزی مثل `100mb`، `1gb` یا `250kb` بنویس (حداقل ۱ کیلوبایت، حداکثر {max}).",
+    },
+    "split_downloading": {"en": "⬇️ Downloading source file...", "fa": "⬇️ در حال دانلود فایل اصلی..."},
+    "split_downloading_pct": {
+        "en": "⬇️ Downloading source file... {pct}%  ({done} / {total})",
+        "fa": "⬇️ در حال دانلود فایل اصلی... {pct}٪  ({done} / {total})",
+    },
+    "split_splitting": {
+        "en": "✂️ Splitting into ~{size} parts... {n} part(s) so far",
+        "fa": "✂️ در حال تقسیم به تیکه‌های ~{size}... تا الان {n} تیکه",
+    },
+    "split_uploading": {
+        "en": "📤 Uploading part {n} ({size})...",
+        "fa": "📤 در حال آپلود تیکه {n} ({size})...",
+    },
+    "split_caption": {
+        "en": "✂️ **{name}**\n━━━━━━━━━━━━━━━━\n📦 Part **{n}** of **{total}**  ·  {size}",
+        "fa": "✂️ **{name}**\n━━━━━━━━━━━━━━━━\n📦 تیکه **{n}** از **{total}**  ·  {size}",
+    },
+    "split_done": {
+        "en": "✅ Done! Split into **{n}** parts (total {size}).",
+        "fa": "✅ تموم شد! به **{n}** تیکه تقسیم شد (مجموع {size}).",
+    },
+    "split_failed": {"en": "❌ Split failed: `{e}`", "fa": "❌ تقسیم ناموفق بود: `{e}`"},
+
     # .style / .aged / .cartoon
     "style_usage": {
         "en": "🎨 **Style transfer** — Reply to a photo with:\n  `{p}style <style>`\n\nPresets: `vangogh`, `monet`, `anime`, `ghibli`, `pixar`, `disney`, `watercolor`, `oil`, `sketch`, `cyberpunk`, `comic`, `popart`, `lego`, `minecraft`, `pixel`, `vaporwave`, `ukiyoe`, `noir`, `claymation`\n\nPersian: `انیمه`, `گیبلی`, `پیکسار`, `ون‌گوگ`, `آبرنگ`, `رنگ‌روغن`, `سایبرپانک`, `کمیک`, `لگو`, `نوآر` ...\nOr any free-form description (e.g. `{p}style steampunk illustration with brass gears`).",
@@ -834,7 +870,8 @@ I18N = {
             "  `{p}ask <question>` — analyse a PDF/text file & answer questions\n"
             "     reply to a file + `{p}ask`, then ask follow-ups anytime\n"
             "  `{p}file <ext> <text>` — make a file from text (or reply to a message)\n"
-            "  `{p}mergetxt <link>` — merge all .txt files of a channel/group into one file\n\n"
+            "  `{p}mergetxt <link>` — merge all .txt files of a channel/group into one file\n"
+            "  `{p}split <size>` — reply to a file to split it into parts (e.g. `{p}split 100mb`)\n\n"
             "🔊 **Voice (Text-to-Speech)**\n"
             "  `{p}say <text>` — send text as a natural voice message\n"
             "     reply + `{p}say` — speak the replied message\n"
@@ -917,7 +954,8 @@ I18N = {
             "  `{p}ask <سوال>` — تحلیل فایل PDF/متنی و پاسخ به سوالات\n"
             "     روی فایل ریپلای بزن + `{p}ask`، بعد هر وقت خواستی سوال بپرس\n"
             "  `{p}file <پسوند> <متن>` — ساخت فایل از متن (یا ریپلای روی یه پیام)\n"
-            "  `{p}mergetxt <لینک>` — ادغام همه فایل‌های .txt یه کانال/گروه در یک فایل\n\n"
+            "  `{p}mergetxt <لینک>` — ادغام همه فایل‌های .txt یه کانال/گروه در یک فایل\n"
+            "  `{p}split <حجم>` — روی یه فایل ریپلای کن تا به تیکه تقسیم بشه (مثلاً `{p}split 100mb`)\n\n"
             "🔊 **صدا (متن به گفتار)**\n"
             "  `{p}say <متن>` — متن رو به صورت ویس طبیعی می‌فرسته\n"
             "     ریپلای + `{p}say` — پیام ریپلای‌شده رو می‌خونه\n"
@@ -4418,6 +4456,141 @@ async def cmd_mergetxt(event):
     except Exception:  # noqa: BLE001
         pass
     log.info(f"[.mergetxt] merged {count} txt files from {title} ({_human_size(total)})")
+
+
+# ═════════ Split a large file into size-limited parts (.split) ═════════
+MAX_PART_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB per part (Telegram non-premium limit)
+MIN_PART_SIZE = 1024                    # 1 KB
+
+
+def _parse_size_arg(s: str):
+    """Parse '100mb' / '1gb' / '250kb' / '500' → bytes (bare number = MB). None if invalid."""
+    if not s:
+        return None
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|k|m|g)?\s*", s, re.I)
+    if not m:
+        return None
+    num = float(m.group(1))
+    unit = (m.group(2) or "mb").lower()
+    mult = {"b": 1, "k": 1024, "kb": 1024, "m": 1024**2, "mb": 1024**2,
+            "g": 1024**3, "gb": 1024**3}[unit]
+    n = int(num * mult)
+    if n < MIN_PART_SIZE or n > MAX_PART_SIZE:
+        return None
+    return n
+
+
+@client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}split(?:\s+(\S+))?$"))
+@owner_only
+async def cmd_split(event):
+    """Split a replied file into line-aligned parts of a chosen max size."""
+    if not event.is_reply:
+        await event.edit(t("split_no_file", p=CMD_PREFIX))
+        return
+    replied = await event.get_reply_message()
+    f = getattr(replied, "file", None) if replied else None
+    if not f:
+        await event.edit(t("split_no_file", p=CMD_PREFIX))
+        return
+
+    part_bytes = _parse_size_arg(event.pattern_match.group(1))
+    if not part_bytes:
+        await event.edit(t("split_bad_size", max=_human_size(MAX_PART_SIZE)))
+        return
+
+    orig_name = f.name or "file.txt"
+    base, ext = os.path.splitext(orig_name)
+    base = re.sub(r'[\\/:*?"<>|]+', "_", base).strip() or "file"
+    ext = ext or ".txt"
+
+    status = await event.edit(t("split_downloading"))
+    tmpdir = tempfile.mkdtemp(prefix="bidar_split_")
+    src_path = os.path.join(tmpdir, "source" + ext)
+    total_bytes = getattr(f, "size", 0) or 0
+    reply_to = replied.id
+
+    last_edit = [0.0]
+
+    async def _dl_cb(recv, total):
+        now = time.time()
+        if now - last_edit[0] >= 3:
+            last_edit[0] = now
+            pct = (recv * 100 // total) if total else 0
+            await _safe_edit(status, t("split_downloading_pct", pct=pct,
+                                       done=_human_size(recv),
+                                       total=_human_size(total or total_bytes)))
+
+    try:
+        await client.download_media(replied, file=src_path, progress_callback=_dl_cb)
+
+        part_no = 0
+        cur_size = 0
+        cur_path = None
+        cur_fh = None
+        parts = []  # (path, size)
+        last_edit[0] = 0.0
+
+        def _open_part():
+            nonlocal part_no, cur_path, cur_fh, cur_size
+            part_no += 1
+            cur_path = os.path.join(tmpdir, f"{base[:50]}_part{part_no}{ext}")
+            cur_fh = open(cur_path, "wb")
+            cur_size = 0
+
+        with open(src_path, "rb") as src:
+            for line in src:  # iterates line-by-line, keeps line endings
+                if cur_fh is None:
+                    _open_part()
+                # roll to next part if this line would overflow (and part not empty)
+                if cur_size and cur_size + len(line) > part_bytes:
+                    cur_fh.close()
+                    parts.append((cur_path, cur_size))
+                    _open_part()
+                cur_fh.write(line)
+                cur_size += len(line)
+                now = time.time()
+                if now - last_edit[0] >= 3:
+                    last_edit[0] = now
+                    await _safe_edit(status, t("split_splitting",
+                                               size=_human_size(part_bytes), n=part_no))
+            if cur_fh is not None:
+                cur_fh.close()
+                if cur_size > 0:
+                    parts.append((cur_path, cur_size))
+                else:
+                    try:
+                        os.remove(cur_path)
+                    except OSError:
+                        pass
+
+        if not parts:
+            await _safe_edit(status, t("split_failed", e="file is empty"))
+            return
+
+        total_parts = len(parts)
+        sent_total = 0
+        for idx, (ppath, psize) in enumerate(parts, 1):
+            await _safe_edit(status, t("split_uploading", n=idx, size=_human_size(psize)))
+            await client.send_file(
+                event.chat_id, ppath,
+                caption=t("split_caption", name=orig_name, n=idx,
+                          total=total_parts, size=_human_size(psize)),
+                force_document=True,
+                reply_to=reply_to,
+            )
+            sent_total += psize
+            try:
+                os.remove(ppath)
+            except OSError:
+                pass
+
+        await _safe_edit(status, t("split_done", n=total_parts,
+                                   size=_human_size(sent_total)))
+    except Exception as e:  # noqa: BLE001
+        log.error(f"[.split] failed: {e}")
+        await _safe_edit(status, t("split_failed", e=str(e)[:200]))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ═════════ Text → file (.file / .mkfile) ═════════

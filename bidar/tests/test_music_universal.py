@@ -2314,5 +2314,121 @@ class TestCmdMergeTxt(unittest.IsolatedAsyncioTestCase):
         status.edit.assert_awaited()
 
 
+class TestParseSizeArg(unittest.TestCase):
+    def test_units(self):
+        self.assertEqual(bidar._parse_size_arg("100mb"), 100 * 1024**2)
+        self.assertEqual(bidar._parse_size_arg("1gb"), 1024**3)
+        self.assertEqual(bidar._parse_size_arg("250kb"), 250 * 1024)
+        self.assertEqual(bidar._parse_size_arg("500"), 500 * 1024**2)  # bare = MB
+        self.assertEqual(bidar._parse_size_arg("2m"), 2 * 1024**2)
+
+    def test_invalid(self):
+        self.assertIsNone(bidar._parse_size_arg(""))
+        self.assertIsNone(bidar._parse_size_arg(None))
+        self.assertIsNone(bidar._parse_size_arg("abc"))
+        self.assertIsNone(bidar._parse_size_arg("0kb"))          # below min
+        self.assertIsNone(bidar._parse_size_arg("5gb"))          # above 2GB max
+
+
+class TestCmdSplit(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        bidar.OWNER_ID = 999
+
+    def _event(self, raw, is_reply=True):
+        status = MagicMock(); status.edit = AsyncMock(); status.delete = AsyncMock()
+        ev = MagicMock()
+        ev.sender_id = 999; ev.out = True; ev.chat_id = 55
+        ev.is_reply = is_reply
+        ev.pattern_match.group.return_value = raw
+        ev.edit = AsyncMock(return_value=status)
+        return ev, status
+
+    async def test_splits_at_line_boundaries(self):
+        # 20 lines of 500 bytes each → ~10 KB; split at 2kb
+        lines = "".join(f"{'x'*499}\n" for _ in range(20))  # 500 bytes/line
+        src_bytes = lines.encode()
+        replied = MagicMock()
+        replied.id = 7
+        replied.file = MagicMock(); replied.file.name = "dump.txt"; replied.file.size = len(src_bytes)
+
+        ev, status = self._event("2kb")
+        ev.get_reply_message = AsyncMock(return_value=replied)
+
+        sent = []
+
+        async def fake_download(msg, file=None, progress_callback=None):
+            with open(file, "wb") as f:
+                f.write(src_bytes)
+            if progress_callback:
+                await progress_callback(len(src_bytes), len(src_bytes))
+
+        async def fake_send_file(chat_id, path, **kw):
+            with open(path, "rb") as f:
+                sent.append({"name": os.path.basename(path), "content": f.read(),
+                             "caption": kw.get("caption"), "reply_to": kw.get("reply_to")})
+
+        with patch.object(bidar, "client") as mc:
+            mc.download_media = AsyncMock(side_effect=fake_download)
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            await bidar.cmd_split(ev)
+
+        # every part ≤ 2 KB, and joined content equals the original
+        self.assertTrue(len(sent) >= 3)
+        for p in sent:
+            self.assertLessEqual(len(p["content"]), 2 * 1024)
+            # no line cut: each part ends with a full line (newline)
+            self.assertTrue(p["content"].endswith(b"\n"))
+        joined = b"".join(p["content"] for p in sent)
+        self.assertEqual(joined, src_bytes)
+        # names are part1, part2...
+        self.assertEqual(sent[0]["name"], "dump_part1.txt")
+        self.assertEqual(sent[1]["name"], "dump_part2.txt")
+        self.assertEqual(sent[0]["reply_to"], 7)
+
+    async def test_no_reply(self):
+        ev, status = self._event("100mb", is_reply=False)
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock()
+            await bidar.cmd_split(ev)
+        mc.send_file.assert_not_called()
+        ev.edit.assert_awaited()
+
+    async def test_bad_size(self):
+        replied = MagicMock(); replied.id = 1
+        replied.file = MagicMock(); replied.file.name = "x.txt"; replied.file.size = 10
+        ev, status = self._event("banana")
+        ev.get_reply_message = AsyncMock(return_value=replied)
+        with patch.object(bidar, "client") as mc:
+            mc.send_file = AsyncMock()
+            await bidar.cmd_split(ev)
+        mc.send_file.assert_not_called()
+
+    async def test_long_line_gets_own_part(self):
+        # single line larger than part size → must still be emitted (can't break line)
+        src_bytes = ("y" * 5000 + "\n" + "z" * 10 + "\n").encode()
+        replied = MagicMock(); replied.id = 3
+        replied.file = MagicMock(); replied.file.name = "big.log"; replied.file.size = len(src_bytes)
+        ev, status = self._event("2kb")
+        ev.get_reply_message = AsyncMock(return_value=replied)
+        sent = []
+
+        async def fake_download(msg, file=None, progress_callback=None):
+            with open(file, "wb") as f:
+                f.write(src_bytes)
+
+        async def fake_send_file(chat_id, path, **kw):
+            with open(path, "rb") as f:
+                sent.append(f.read())
+
+        with patch.object(bidar, "client") as mc:
+            mc.download_media = AsyncMock(side_effect=fake_download)
+            mc.send_file = AsyncMock(side_effect=fake_send_file)
+            await bidar.cmd_split(ev)
+        joined = b"".join(sent)
+        self.assertEqual(joined, src_bytes)
+        # first part is the oversized single line (5000+1 bytes)
+        self.assertEqual(sent[0], ("y" * 5000 + "\n").encode())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
