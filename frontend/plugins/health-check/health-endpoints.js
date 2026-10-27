@@ -6,11 +6,21 @@ const os = require('os');
 const SERVER_START_TIME = Date.now();
 
 /**
- * Setup health check endpoints on the dev server
+ * Setup health check endpoints on the dev server.
+ * These endpoints are intended ONLY for development environments
+ * and should NOT be exposed in production builds.
  * @param {Object} devServer - Webpack dev server instance
  * @param {Object} healthPlugin - Instance of WebpackHealthPlugin
  */
 function setupHealthEndpoints(devServer, healthPlugin) {
+  // Ensure these endpoints are only set up in a development context.
+  // In a production environment, health checks should be handled by the backend
+  // with appropriate security measures and minimal information disclosure.
+  if (process.env.NODE_ENV === 'production') {
+    console.log('[Health Check] Skipping health endpoints setup in production environment.');
+    return;
+  }
+
   if (!devServer || !devServer.app) {
     console.warn('[Health Check] Dev server not available, skipping health endpoints');
     return;
