@@ -110,12 +110,21 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.22.0"
+VERSION = "1.22.1"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
 # Kontinent AI — text & vision provider (OpenAI-compatible). Image-gen & TTS stay on Emergent.
 KONTINENT_API_KEY = os.environ.get("KONTINENT_API_KEY", "").strip()
 KONTINENT_BASE_URL = os.environ.get("KONTINENT_BASE_URL", "https://api.kontinentai.com/v1").strip()
+# Kontinent AI text/vision model catalogue (fallback; live list fetched from GET /v1/models).
+KONTINENT_MODELS: tuple[str, ...] = (
+    "gemini-3.5-flash", "gemini-3.1-pro-preview",
+    "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5",
+    "claude-haiku-4-5-20251001", "claude-fable-5-1",
+    "gpt-5.5", "gpt-6.1-sol", "gpt-5",
+    "glm-5.3", "qwen3.8-max", "deepseek-v4.1-flash",
+)
+KONTINENT_TEXT_DEFAULT = "gemini-3.5-flash"
 
 DEFAULT_AUTOREPLY = os.environ.get(
     "AFK_MESSAGE",
@@ -180,6 +189,13 @@ def load_config() -> None:
         except Exception as e:  # noqa: BLE001
             log.warning(f"Config read failed; using defaults: {e}")
     config = base
+    # Auto-heal a stale/invalid text model (e.g. an old Emergent id saved in
+    # bidar_config.json) → reset to a valid Kontinent model so AI doesn't 404.
+    if config.get("ai_model") not in KONTINENT_MODELS:
+        log.warning(f"ai_model '{config.get('ai_model')}' is not a Kontinent model — "
+                    f"resetting to '{KONTINENT_TEXT_DEFAULT}'")
+        config["ai_model"] = KONTINENT_TEXT_DEFAULT
+        save_config()
 
 
 def save_config() -> None:
@@ -296,8 +312,12 @@ I18N = {
         "fa": "✅ **شخصیت دستیار آپدیت شد**\n\n🎭 متن جدید:\n`{p}`\n\n🔄 همه مکالمات قبلی ریست شدن.",
     },
     "aimodel_show": {
-        "en": "📚 **Current model:** `{m}`\n\n🌟 Kontinent AI models:\n  `{p}aimodel gemini-3.5-flash` ⚡ (default)\n  `{p}aimodel gemini-3.1-pro-preview`\n  `{p}aimodel claude-sonnet-5-5`\n  `{p}aimodel claude-haiku-4-5-20251001` (cheap)\n  `{p}aimodel gpt-5.5`",
-        "fa": "📚 **مدل فعلی:** `{m}`\n\n🌟 مدل‌های Kontinent AI:\n  `{p}aimodel gemini-3.5-flash` ⚡ (پیش‌فرض)\n  `{p}aimodel gemini-3.1-pro-preview`\n  `{p}aimodel claude-sonnet-5-5`\n  `{p}aimodel claude-haiku-4-5-20251001` (ارزون)\n  `{p}aimodel gpt-5.5`",
+        "en": "📚 **Current model:** `{m}`\n\n🌟 **Available Kontinent AI models** (live):\n{models}\n\n💡 Tap any line, or type `{p}aimodel <id>`.",
+        "fa": "📚 **مدل فعلی:** `{m}`\n\n🌟 **مدل‌های موجود Kontinent AI** (زنده):\n{models}\n\n💡 روی هر خط بزن، یا بنویس `{p}aimodel <id>`.",
+    },
+    "aimodel_unknown": {
+        "en": "❌ Unknown model: `{arg}`\n\n🌟 Available models:\n{models}",
+        "fa": "❌ مدل ناشناخته: `{arg}`\n\n🌟 مدل‌های موجود:\n{models}",
     },
     "aimodel_updated": {
         "en": "✅ **AI model updated**\n\n📚 New model: `{m}`\n🏢 Provider: `{prov}`\n🔄 All conversations reset.",
@@ -1084,6 +1104,24 @@ def _get_kontinent_client():
     if _kontinent_client is None:
         _kontinent_client = AsyncOpenAI(api_key=KONTINENT_API_KEY, base_url=KONTINENT_BASE_URL)
     return _kontinent_client
+
+
+_kontinent_models_cache: list[str] = []
+
+
+async def _fetch_kontinent_models() -> list[str]:
+    """Live model ids from GET /v1/models (cached). Falls back to the hardcoded list."""
+    global _kontinent_models_cache
+    if _kontinent_models_cache:
+        return _kontinent_models_cache
+    try:
+        res = await _get_kontinent_client().models.list()
+        ids = sorted({m.id for m in res.data if getattr(m, "id", None)})
+        if ids:
+            _kontinent_models_cache = ids
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"[.aimodel] live model list fetch failed: {e}")
+    return _kontinent_models_cache or list(KONTINENT_MODELS)
 
 
 def _text_ai_ready() -> tuple[bool, str]:
@@ -3253,8 +3291,14 @@ async def cmd_personality(event):
 @owner_only
 async def cmd_aimodel(event):
     arg = event.pattern_match.group(1)
+    models = await _fetch_kontinent_models()
     if arg is None:
-        await event.edit(t("aimodel_show", m=config["ai_model"], p=CMD_PREFIX))
+        lst = "\n".join(f"  `{CMD_PREFIX}aimodel {m}`" for m in models)
+        await event.edit(t("aimodel_show", m=config["ai_model"], models=lst, p=CMD_PREFIX))
+        return
+    if arg not in models:
+        lst = "\n".join(f"  `{m}`" for m in models)
+        await event.edit(t("aimodel_unknown", arg=arg, models=lst))
         return
     config["ai_model"] = arg
     save_config()

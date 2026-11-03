@@ -2481,5 +2481,72 @@ class TestKontinentChat(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok)
 
 
+class TestConfigModelHeal(unittest.TestCase):
+    def _load_with(self, saved: dict):
+        import json, tempfile
+        from pathlib import Path
+        p = Path(tempfile.mkdtemp()) / "bidar_config.json"
+        p.write_text(json.dumps(saved))
+        old = bidar.CONFIG_FILE
+        bidar.CONFIG_FILE = p
+        try:
+            bidar.load_config()
+            return dict(bidar.config)
+        finally:
+            bidar.CONFIG_FILE = old
+
+    def test_stale_model_is_healed(self):
+        cfg = self._load_with({"ai_model": "gemini-3-flash-preview"})
+        self.assertEqual(cfg["ai_model"], bidar.KONTINENT_TEXT_DEFAULT)
+
+    def test_old_emergent_ids_healed(self):
+        for bad in ("gpt-4o-mini", "gemini-2.5-pro", "claude-sonnet-4-5-20250929"):
+            cfg = self._load_with({"ai_model": bad})
+            self.assertEqual(cfg["ai_model"], bidar.KONTINENT_TEXT_DEFAULT)
+
+    def test_valid_kontinent_model_kept(self):
+        cfg = self._load_with({"ai_model": "claude-sonnet-5-5"})
+        self.assertEqual(cfg["ai_model"], "claude-sonnet-5-5")
+
+
+class TestCmdAimodel(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        bidar.OWNER_ID = 999
+        bidar.config = copy.deepcopy(bidar._DEFAULT_CONFIG)
+
+    def _event(self, arg):
+        status = MagicMock(); status.edit = AsyncMock()
+        ev = MagicMock(); ev.sender_id = 999
+        ev.pattern_match.group.return_value = arg
+        ev.edit = AsyncMock(return_value=status)
+        return ev
+
+    async def test_rejects_unknown_model(self):
+        ev = self._event("gemini-3-flash-preview")
+        with patch.object(bidar, "_fetch_kontinent_models",
+                          return_value=list(bidar.KONTINENT_MODELS)), \
+             patch.object(bidar, "save_config"):
+            await bidar.cmd_aimodel(ev)
+        self.assertEqual(bidar.config["ai_model"], "gemini-3.5-flash")  # unchanged
+        self.assertIn("gemini-3-flash-preview", str(ev.edit.await_args_list[-1]))
+
+    async def test_accepts_valid_model(self):
+        ev = self._event("gpt-5.5")
+        with patch.object(bidar, "_fetch_kontinent_models",
+                          return_value=list(bidar.KONTINENT_MODELS)), \
+             patch.object(bidar, "save_config"):
+            await bidar.cmd_aimodel(ev)
+        self.assertEqual(bidar.config["ai_model"], "gpt-5.5")
+
+    async def test_list_shows_all_models(self):
+        ev = self._event(None)
+        with patch.object(bidar, "_fetch_kontinent_models",
+                          return_value=["claude-opus-5-5", "gpt-5.5", "gemini-3.5-flash"]):
+            await bidar.cmd_aimodel(ev)
+        shown = str(ev.edit.await_args_list[-1])
+        self.assertIn("claude-opus-5-5", shown)
+        self.assertIn("gpt-5.5", shown)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
