@@ -146,6 +146,15 @@ User request: split a large (e.g. 4 GB) `.txt` file into parts of a chosen size,
 - ✅ Parts named `<base>_part1<ext>`, `_part2<ext>`... sent in order, each replying to the source message; each part uploaded then deleted from disk to keep footprint low.
 - ✅ Live progress: downloading %, splitting count, per-part upload, final done summary. Bilingual i18n (`split_*`). Help menu + version 1.21.0.
 - ✅ Suite: 244 passed. E2E self-test: 5 MB / 82k-line dump split into 1 MB parts → all ≤1 MB, all end on a newline, reassembly == original.
+
+### v1.22.0 — Kontinent AI for text & vision (Completed Sep 2026)
+User request: use kontinentai.com API instead of Emergent for AI features.
+- ✅ Kontinent AI is OpenAI-compatible (`https://api.kontinentai.com/v1`, key `sk-kont-...`). Added `KONTINENT_API_KEY` + `KONTINENT_BASE_URL` env, lazy `AsyncOpenAI` client, `_text_ai_ready()`, and central `_kontinent_chat(system, user_text, image_b64=, history=, model=)` helper (text + vision via `image_url` data URI).
+- ✅ Migrated ALL text/vision features to Kontinent: `.r` (+ vision), `.tl`, `.tldr`, `.ask`, `.ocr`, and group/private auto-reply. Conversational memory (`_chat_sessions`) now stores OpenAI-style message lists (rolling last ~10 turns).
+- ✅ Default text model → `gemini-3.5-flash`; `.aimodel` suggestions updated to Kontinent ids (gemini-3.5-flash, gemini-3.1-pro-preview, claude-sonnet-5-5, claude-haiku-4-5-20251001, gpt-5.5).
+- ⚠️ CONSTRAINT: Kontinent has **no image generation and no TTS**. So `.img/.imgedit/.style/.aged/.cartoon/.mix` and `.say` **remain on Emergent** (`EMERGENT_LLM_KEY`, unchanged). Hybrid by design.
+- ✅ `openai` added to requirements.txt; `.env.example`, README, `ai_not_ready` message updated. Version 1.22.0.
+- ✅ Suite: 248 passed. LIVE E2E with real Kontinent key: plain text (Nairobi), translate (EN→FA), and vision (blue image → "Blue") all succeeded.
 - ✅ Tests: **238 passing** (rewrote TestCmdCheckout: owner success, member-in-allow-group allowed, member-in-non-allow ignored, failure/none handling, Location-header parsing) + real E2E against the live FreeCAD endpoint (all 3 access scenarios)
 
 ### v1.19.0 — `.mergetxt` Merge all .txt files of a chat (Completed Jul 2026)

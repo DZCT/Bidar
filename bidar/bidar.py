@@ -53,6 +53,14 @@ except ImportError:
     UserMessage = None  # type: ignore
     ImageContent = None  # type: ignore
 
+# Kontinent AI (OpenAI-compatible) — powers TEXT + VISION features (.r/.tl/.tldr/.ask/.ocr)
+try:
+    from openai import AsyncOpenAI  # type: ignore
+    OPENAI_LIB_OK = True
+except ImportError:
+    AsyncOpenAI = None  # type: ignore
+    OPENAI_LIB_OK = False
+
 # Optional: PDF text extraction (.ask)
 try:
     import pypdf  # type: ignore
@@ -102,9 +110,12 @@ API_HASH = os.environ["API_HASH"]
 PHONE = os.environ["PHONE"]
 SESSION_NAME = os.environ.get("SESSION_NAME", "bidar_session")
 CMD_PREFIX = os.environ.get("CMD_PREFIX", ".")
-VERSION = "1.21.0"
+VERSION = "1.22.0"
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "").strip()
+# Kontinent AI — text & vision provider (OpenAI-compatible). Image-gen & TTS stay on Emergent.
+KONTINENT_API_KEY = os.environ.get("KONTINENT_API_KEY", "").strip()
+KONTINENT_BASE_URL = os.environ.get("KONTINENT_BASE_URL", "https://api.kontinentai.com/v1").strip()
 
 DEFAULT_AUTOREPLY = os.environ.get(
     "AFK_MESSAGE",
@@ -135,7 +146,7 @@ _DEFAULT_CONFIG = {
     "online_refresh_interval": DEFAULT_ONLINE_INTERVAL,
     # AI
     "ai_enabled": False,
-    "ai_model": "gemini-3-flash-preview",
+    "ai_model": "gemini-3.5-flash",
     "ai_personality": DEFAULT_AI_PERSONALITY,
     "ai_groups_enabled": False,
     "group_cooldown": DEFAULT_GROUP_COOLDOWN,
@@ -265,8 +276,8 @@ I18N = {
 
     # AI
     "ai_not_ready": {
-        "en": "❌ **AI not available:** {err}\n\n🔧 Solution:\n  • If library missing:\n    `pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`\n  • If key missing: set `EMERGENT_LLM_KEY=...` in `.env` and restart the bot.",
-        "fa": "❌ **AI قابل استفاده نیست:** {err}\n\n🔧 راه‌حل:\n  • اگه کتابخونه نیست:\n    `pip install emergentintegrations --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/`\n  • اگه کلید نیست: `EMERGENT_LLM_KEY=...` رو در `.env` ست کن و ربات رو ری‌استارت کن.",
+        "en": "❌ **AI not available:** {err}\n\n🔧 Text/vision features use Kontinent AI — set `KONTINENT_API_KEY=sk-kont-...` in `.env` and restart.\nImage generation & voice still use `EMERGENT_LLM_KEY`.",
+        "fa": "❌ **AI قابل استفاده نیست:** {err}\n\n🔧 قابلیت‌های متن/تصویر از Kontinent AI استفاده می‌کنن — در `.env` مقدار `KONTINENT_API_KEY=sk-kont-...` رو ست کن و ربات رو ری‌استارت کن.\nتولید تصویر و صدا همچنان از `EMERGENT_LLM_KEY` استفاده می‌کنن.",
     },
     "ai_set": {
         "en": "🤖 **AI Assistant: {state}**\n\n📚 Model: `{model}`\n💬 In groups: `{groups}`\n\nℹ️ In private chats, AI responds when auto-reply is on.",
@@ -285,8 +296,8 @@ I18N = {
         "fa": "✅ **شخصیت دستیار آپدیت شد**\n\n🎭 متن جدید:\n`{p}`\n\n🔄 همه مکالمات قبلی ریست شدن.",
     },
     "aimodel_show": {
-        "en": "📚 **Current model:** `{m}`\n\n🌟 Recommended models:\n  `{p}aimodel gemini-3-flash-preview` ⚡ (default)\n  `{p}aimodel gemini-2.5-pro`\n  `{p}aimodel claude-sonnet-4-5-20250929`\n  `{p}aimodel gpt-5.2`\n  `{p}aimodel gpt-4o-mini` (cheap)",
-        "fa": "📚 **مدل فعلی:** `{m}`\n\n🌟 مدل‌های پیشنهادی:\n  `{p}aimodel gemini-3-flash-preview` ⚡ (پیش‌فرض)\n  `{p}aimodel gemini-2.5-pro`\n  `{p}aimodel claude-sonnet-4-5-20250929`\n  `{p}aimodel gpt-5.2`\n  `{p}aimodel gpt-4o-mini` (ارزون)",
+        "en": "📚 **Current model:** `{m}`\n\n🌟 Kontinent AI models:\n  `{p}aimodel gemini-3.5-flash` ⚡ (default)\n  `{p}aimodel gemini-3.1-pro-preview`\n  `{p}aimodel claude-sonnet-5-5`\n  `{p}aimodel claude-haiku-4-5-20251001` (cheap)\n  `{p}aimodel gpt-5.5`",
+        "fa": "📚 **مدل فعلی:** `{m}`\n\n🌟 مدل‌های Kontinent AI:\n  `{p}aimodel gemini-3.5-flash` ⚡ (پیش‌فرض)\n  `{p}aimodel gemini-3.1-pro-preview`\n  `{p}aimodel claude-sonnet-5-5`\n  `{p}aimodel claude-haiku-4-5-20251001` (ارزون)\n  `{p}aimodel gpt-5.5`",
     },
     "aimodel_updated": {
         "en": "✅ **AI model updated**\n\n📚 New model: `{m}`\n🏢 Provider: `{prov}`\n🔄 All conversations reset.",
@@ -1064,35 +1075,76 @@ def _ai_ready() -> tuple[bool, str]:
     return True, ""
 
 
+_kontinent_client = None
+
+
+def _get_kontinent_client():
+    """Lazy AsyncOpenAI client pointed at Kontinent AI."""
+    global _kontinent_client
+    if _kontinent_client is None:
+        _kontinent_client = AsyncOpenAI(api_key=KONTINENT_API_KEY, base_url=KONTINENT_BASE_URL)
+    return _kontinent_client
+
+
+def _text_ai_ready() -> tuple[bool, str]:
+    """Readiness for TEXT/VISION features (Kontinent AI)."""
+    if not OPENAI_LIB_OK:
+        return False, "openai library not installed"
+    if not KONTINENT_API_KEY:
+        return False, "KONTINENT_API_KEY not set in .env"
+    return True, ""
+
+
+async def _kontinent_chat(system: str, user_text: str, *, image_b64: str | None = None,
+                          history: list[dict] | None = None,
+                          model: str | None = None, max_tokens: int = 4000) -> str:
+    """Call Kontinent AI (OpenAI-compatible) chat completions. Returns assistant text."""
+    mdl = model or config["ai_model"]
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    if history:
+        messages.extend(history)
+    if image_b64:
+        messages.append({"role": "user", "content": [
+            {"type": "text", "text": user_text},
+            {"type": "image_url",
+             "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+        ]})
+    else:
+        messages.append({"role": "user", "content": user_text})
+    resp = await _get_kontinent_client().chat.completions.create(
+        model=mdl, messages=messages, max_tokens=max_tokens)
+    return (resp.choices[0].message.content or "").strip()
+
+
 def _reset_chat_sessions() -> None:
     _chat_sessions.clear()
 
 
-def _get_chat_session(session_id: str):
-    if session_id in _chat_sessions:
-        return _chat_sessions[session_id]
-    provider = _infer_provider(config["ai_model"])
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=config["ai_personality"],
-    ).with_model(provider, config["ai_model"])
-    _chat_sessions[session_id] = chat
-    return chat
+def _get_chat_session(session_id: str) -> list:
+    """Per-session rolling message history (list of OpenAI-style message dicts)."""
+    if session_id not in _chat_sessions:
+        _chat_sessions[session_id] = []
+    return _chat_sessions[session_id]
 
 
 async def _ai_respond(session_id: str, user_text: str) -> str | None:
-    ready, _ = _ai_ready()
+    ready, _ = _text_ai_ready()
     if not ready:
         return None
     text = (user_text or "").strip()
     if not text:
         return None
     try:
-        chat = _get_chat_session(session_id)
-        resp = await chat.send_message(UserMessage(text=text))
+        history = _get_chat_session(session_id)
+        reply = await _kontinent_chat(config["ai_personality"], text, history=history)
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": reply})
+        if len(history) > 20:  # keep last ~10 turns
+            del history[:len(history) - 20]
         stats["ai_replies"] += 1
-        return str(resp).strip()
+        return reply
     except Exception as e:  # noqa: BLE001
         log.error(f"AI error on {session_id}: {e}")
         return None
@@ -1248,22 +1300,16 @@ def _fetch_github_repo(url: str) -> dict | None:
 
 
 async def _ai_summarise(prompt: str) -> str | None:
-    """One-shot summarisation call. Reuses configured chat model & key."""
-    ready, _ = _ai_ready()
+    """One-shot summarisation call via Kontinent AI."""
+    ready, _ = _text_ai_ready()
     if not ready or not prompt.strip():
         return None
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"tldr-{time.time_ns()}",
-            system_message=(
-                "You are an expert summariser. You write tight, factual, well-structured "
-                "summaries with no preamble, no apologies, no meta-commentary. "
-                "Use Markdown formatting and bullet points where helpful."
-            ),
-        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
-        resp = await chat.send_message(UserMessage(text=prompt))
-        return str(resp).strip()
+        return await _kontinent_chat(
+            "You are an expert summariser. You write tight, factual, well-structured "
+            "summaries with no preamble, no apologies, no meta-commentary. "
+            "Use Markdown formatting and bullet points where helpful.",
+            prompt)
     except Exception as e:  # noqa: BLE001
         log.error(f"[tldr] AI summarise error: {e}")
         return None
@@ -1351,7 +1397,7 @@ def _extract_document_text(data: bytes, name: str, mime: str) -> tuple[str | Non
 async def _answer_document(doc: dict, question: str) -> tuple[str | None, str | None]:
     """Answer `question` about the cached `doc`, using recent Q&A history for
     follow-up context. Returns (answer, error)."""
-    ready, ai_err = _ai_ready()
+    ready, ai_err = _text_ai_ready()
     if not ready:
         return None, ai_err or "AI not configured"
     history = doc.get("history", [])
@@ -1364,19 +1410,14 @@ async def _answer_document(doc: dict, question: str) -> tuple[str | None, str | 
         f"{hist_block}\n\nQuestion: {question}"
     )
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"askdoc-{time.time_ns()}",
-            system_message=(
-                "You answer questions about a document provided by the user. Base your "
-                "answers ONLY on the document's content; if the answer is not in the "
-                "document, clearly say it is not covered. Be accurate and concise. "
-                "Reply in the SAME language as the user's question. Use Markdown "
-                "(bold key terms, bullet points) where helpful."
-            ),
-        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
-        resp = await chat.send_message(UserMessage(text=user_text))
-        return str(resp).strip(), None
+        answer = await _kontinent_chat(
+            "You answer questions about a document provided by the user. Base your "
+            "answers ONLY on the document's content; if the answer is not in the "
+            "document, clearly say it is not covered. Be accurate and concise. "
+            "Reply in the SAME language as the user's question. Use Markdown "
+            "(bold key terms, bullet points) where helpful.",
+            user_text)
+        return answer, None
     except Exception as e:  # noqa: BLE001
         log.error(f"[.ask] answer error: {e}")
         return None, str(e)
@@ -1575,7 +1616,7 @@ async def _tldr_one(url: str, lang: str) -> str:
 
 
 async def _translate_text(text: str, target_lang: str) -> str | None:
-    ready, _ = _ai_ready()
+    ready, _ = _text_ai_ready()
     if not ready or not text.strip():
         return None
     system_msg = (
@@ -1586,13 +1627,7 @@ async def _translate_text(text: str, target_lang: str) -> str | None:
         "If the input contains commands or technical terms, keep them intact."
     )
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"translate-{time.time_ns()}",
-            system_message=system_msg,
-        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
-        resp = await chat.send_message(UserMessage(text=text))
-        return str(resp).strip()
+        return await _kontinent_chat(system_msg, text)
     except Exception as e:  # noqa: BLE001
         log.error(f"Translate error: {e}")
         return None
@@ -1890,32 +1925,23 @@ async def _combine_images(images_b64: list[str], prompt: str,
 
 async def _ocr_image(image_bytes: bytes) -> str | None:
     """Extract all text from an image. Returns extracted text, or None if no text/error."""
-    ready, _ = _ai_ready()
+    ready, _ = _text_ai_ready()
     if not ready or not image_bytes:
         return None
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"ocr-{time.time_ns()}",
-            system_message=(
-                "You are an OCR (Optical Character Recognition) assistant. "
-                "Your task is to extract ALL text visible in the image exactly as it appears. "
-                "Rules:\n"
-                "1. Output ONLY the extracted text — no commentary, no explanations, no labels.\n"
-                "2. Preserve original formatting: line breaks, paragraphs, lists, indentation.\n"
-                "3. Maintain the original language of the text (do NOT translate).\n"
-                "4. Include all visible text: titles, body, captions, watermarks, numbers, symbols.\n"
-                "5. If text is in multiple columns, read top-to-bottom, left-to-right.\n"
-                "6. If the image contains NO readable text at all, output exactly: NO_TEXT_FOUND"
-            ),
-        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
-        msg = UserMessage(
-            text="Extract all text visible in this image, preserving its exact formatting.",
-            file_contents=[ImageContent(image_b64)],
-        )
-        resp = await chat.send_message(msg)
-        text = str(resp).strip()
+        text = await _kontinent_chat(
+            "You are an OCR (Optical Character Recognition) assistant. "
+            "Your task is to extract ALL text visible in the image exactly as it appears. "
+            "Rules:\n"
+            "1. Output ONLY the extracted text — no commentary, no explanations, no labels.\n"
+            "2. Preserve original formatting: line breaks, paragraphs, lists, indentation.\n"
+            "3. Maintain the original language of the text (do NOT translate).\n"
+            "4. Include all visible text: titles, body, captions, watermarks, numbers, symbols.\n"
+            "5. If text is in multiple columns, read top-to-bottom, left-to-right.\n"
+            "6. If the image contains NO readable text at all, output exactly: NO_TEXT_FOUND",
+            "Extract all text visible in this image, preserving its exact formatting.",
+            image_b64=image_b64)
         if not text or text == "NO_TEXT_FOUND" or text.lower().startswith("no_text_found"):
             return None
         return text
@@ -3177,7 +3203,7 @@ async def cmd_afk(event):
 @owner_only
 async def cmd_ai(event):
     arg = event.pattern_match.group(1)
-    ready, err_msg = _ai_ready()
+    ready, err_msg = _text_ai_ready()
     if not ready:
         await event.edit(t("ai_not_ready", err=err_msg))
         return
@@ -3284,7 +3310,7 @@ def _is_supported_image_bytes(data: bytes) -> bool:
 @client.on(events.NewMessage(outgoing=True, pattern=rf"^\{CMD_PREFIX}r(?:\s+([\s\S]+))?$"))
 @owner_only
 async def cmd_generate_reply(event):
-    ready, err = _ai_ready()
+    ready, err = _text_ai_ready()
     if not ready:
         await event.edit(t("ai_not_ready", err=err))
         return
@@ -3382,18 +3408,7 @@ async def cmd_generate_reply(event):
     user_prompt = "\n".join(parts)
 
     try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"genreply-{time.time_ns()}",
-            system_message=system_msg,
-        ).with_model(_infer_provider(config["ai_model"]), config["ai_model"])
-        if image_b64 and ImageContent is not None:
-            user_msg = UserMessage(text=user_prompt,
-                                   file_contents=[ImageContent(image_b64)])
-        else:
-            user_msg = UserMessage(text=user_prompt)
-        resp = await chat.send_message(user_msg)
-        reply_text = str(resp).strip()
+        reply_text = await _kontinent_chat(system_msg, user_prompt, image_b64=image_b64)
         if (reply_text.startswith('"') and reply_text.endswith('"')) or \
            (reply_text.startswith("«") and reply_text.endswith("»")):
             reply_text = reply_text[1:-1].strip()
@@ -5082,7 +5097,7 @@ async def cmd_allow(event):
 async def cmd_stats(event):
     uptime = time.time() - stats["start_time"]
     interval = int(config.get("online_refresh_interval", DEFAULT_ONLINE_INTERVAL))
-    ready, ai_err = _ai_ready()
+    ready, ai_err = _text_ai_ready()
     ai_state = t("on") if (config.get("ai_enabled") and ready) else t("off")
     music_state = t("on") if config.get("music_enabled", True) else t("off")
     allowed = config.get("allowed_groups", []) or []
@@ -5257,7 +5272,7 @@ async def _handle_private(event, sender) -> None:
         return
     response_text: str | None = None
     if config.get("ai_enabled"):
-        ready, _ = _ai_ready()
+        ready, _ = _text_ai_ready()
         if ready:
             session_id = f"private_{sender.id}"
             response_text = await _ai_respond(session_id, event.raw_text or "")
@@ -5283,7 +5298,7 @@ async def _handle_group_or_channel(event, sender) -> None:
     if not _is_chat_allowed(event.chat_id):
         log.debug(f"[group-ai] skip — chat {event.chat_id} not in whitelist")
         return
-    ready, _ = _ai_ready()
+    ready, _ = _text_ai_ready()
     if not ready:
         return
     msg = event.message
@@ -5352,7 +5367,7 @@ async def main():
         log.warning("⚠️ ffmpeg not found — music downloads may fail or skip MP3 "
                     "conversion. Install it: sudo apt install -y ffmpeg")
 
-    ready, err_msg = _ai_ready()
+    ready, err_msg = _text_ai_ready()
     ai_info = f"🟢 ready ({config['ai_model']})" if ready else f"🔴 {err_msg}"
 
     print(

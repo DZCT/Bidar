@@ -1856,15 +1856,13 @@ class TestDocHelpers(unittest.TestCase):
 class TestAnswerDocument(unittest.IsolatedAsyncioTestCase):
     async def test_answer_uses_doc_and_history(self):
         captured = {}
-        class FakeChat:
-            def with_model(self, *a, **k): return self
-            async def send_message(self, msg):
-                captured["text"] = msg.text
-                return "It is about cats."
+        async def fake_chat(system, user_text, **kw):
+            captured["text"] = user_text
+            return "It is about cats."
         doc = {"name": "cats.txt", "text": "Cats are great pets.",
                "history": [("hi", "hello")]}
-        with patch.object(bidar, "_ai_ready", return_value=(True, "")), \
-             patch.object(bidar, "LlmChat", return_value=FakeChat()):
+        with patch.object(bidar, "_text_ai_ready", return_value=(True, "")), \
+             patch.object(bidar, "_kontinent_chat", side_effect=fake_chat):
             ans, err = await bidar._answer_document(doc, "What is this about?")
         self.assertIsNone(err)
         self.assertEqual(ans, "It is about cats.")
@@ -1874,7 +1872,7 @@ class TestAnswerDocument(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Q: hi", captured["text"])  # history included
 
     async def test_answer_not_ready(self):
-        with patch.object(bidar, "_ai_ready", return_value=(False, "no key")):
+        with patch.object(bidar, "_text_ai_ready", return_value=(False, "no key")):
             ans, err = await bidar._answer_document({"name": "x", "text": "y", "history": []}, "q")
         self.assertIsNone(ans)
         self.assertEqual(err, "no key")
@@ -2428,6 +2426,59 @@ class TestCmdSplit(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(joined, src_bytes)
         # first part is the oversized single line (5000+1 bytes)
         self.assertEqual(sent[0], ("y" * 5000 + "\n").encode())
+
+
+class TestKontinentChat(unittest.IsolatedAsyncioTestCase):
+    def _fake_client(self, captured):
+        class FakeResp:
+            def __init__(self):
+                m = MagicMock(); m.content = "hello world"
+                self.choices = [MagicMock(message=m)]
+        async def create(**kw):
+            captured.update(kw)
+            return FakeResp()
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=create)
+        return client
+
+    async def test_text_message_shape(self):
+        captured = {}
+        with patch.object(bidar, "_get_kontinent_client", return_value=self._fake_client(captured)):
+            out = await bidar._kontinent_chat("SYS", "hi there", model="gemini-3.5-flash")
+        self.assertEqual(out, "hello world")
+        self.assertEqual(captured["model"], "gemini-3.5-flash")
+        msgs = captured["messages"]
+        self.assertEqual(msgs[0], {"role": "system", "content": "SYS"})
+        self.assertEqual(msgs[-1], {"role": "user", "content": "hi there"})
+
+    async def test_vision_message_shape(self):
+        captured = {}
+        with patch.object(bidar, "_get_kontinent_client", return_value=self._fake_client(captured)):
+            await bidar._kontinent_chat("S", "describe", image_b64="QUJD")
+        content = captured["messages"][-1]["content"]
+        self.assertEqual(content[0], {"type": "text", "text": "describe"})
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,QUJD"))
+
+    async def test_history_included(self):
+        captured = {}
+        hist = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
+        with patch.object(bidar, "_get_kontinent_client", return_value=self._fake_client(captured)):
+            await bidar._kontinent_chat("S", "now", history=hist)
+        msgs = captured["messages"]
+        self.assertIn({"role": "user", "content": "a"}, msgs)
+        self.assertEqual(msgs[-1], {"role": "user", "content": "now"})
+
+    def test_text_ai_ready_needs_key(self):
+        with patch.object(bidar, "OPENAI_LIB_OK", True), \
+             patch.object(bidar, "KONTINENT_API_KEY", ""):
+            ok, err = bidar._text_ai_ready()
+        self.assertFalse(ok)
+        self.assertIn("KONTINENT_API_KEY", err)
+        with patch.object(bidar, "OPENAI_LIB_OK", True), \
+             patch.object(bidar, "KONTINENT_API_KEY", "sk-kont-x"):
+            ok, _ = bidar._text_ai_ready()
+        self.assertTrue(ok)
 
 
 if __name__ == "__main__":
