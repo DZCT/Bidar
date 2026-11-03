@@ -1,0 +1,18 @@
+{
+  "summary": "Bidar userbot Kontinent AI migration bug-fix verification (backend/script only, no UI). Full pytest suite: 254/254 passed. Live script (/app/bidar/tests/live_kontinent_check.py) against the real Kontinent API: config auto-heal PASS (gemini-3-flash-preview and gpt-4o-mini reset to gemini-3.5-flash and saved to disk, claude-sonnet-5-5 kept, other keys kept); _translate_text('Hello, how are you?','fa') returned 'سلام، حال شما چطور است؟' PASS; _fetch_kontinent_models() returned all 14 live ids (cache filled from the live call, not the fallback) PASS; vision on a solid-blue PNG returned 'The dominant color is blue.' PASS; text call returned 'The capital of Kenya is Nairobi.' PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/bidar/tests/test_music_universal.py", "/app/bidar/tests/live_kontinent_check.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "load_config() checks ai_model against the hardcoded KONTINENT_MODELS tuple, but .aimodel accepts any id from the live /v1/models list. If Kontinent adds a new model, the user can select it, and the next restart silently resets it to gemini-3.5-flash. Today the live and hardcoded lists match exactly (14 ids), so nothing breaks now. Consider keeping the hardcoded tuple in sync or healing only on a 404.",
+    "_fetch_kontinent_models caches the list for the whole process with no TTL. That's fine, but newly added models won't appear until a restart.",
+    "_kontinent_chat always labels image data as image/jpeg, even for PNG input. It worked in this test, but strict providers may reject it."
+  ],
+  "updated_files": ["/app/bidar/tests/live_kontinent_check.py (new, live verification script)"],
+  "success_rate": {"backend": "100%", "frontend": "N/A"},
+  "seed_data_creation": "None. The heal test used a temp CONFIG_FILE, so no real bidar_config.json was touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Not a web app. Verify with: cd /app/bidar && python -m pytest tests/ -q, then python tests/live_kontinent_check.py (needs KONTINENT_API_KEY in /app/backend/.env and network access)."
+}

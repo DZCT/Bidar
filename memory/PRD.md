@@ -155,6 +155,15 @@ User request: use kontinentai.com API instead of Emergent for AI features.
 - ⚠️ CONSTRAINT: Kontinent has **no image generation and no TTS**. So `.img/.imgedit/.style/.aged/.cartoon/.mix` and `.say` **remain on Emergent** (`EMERGENT_LLM_KEY`, unchanged). Hybrid by design.
 - ✅ `openai` added to requirements.txt; `.env.example`, README, `ai_not_ready` message updated. Version 1.22.0.
 - ✅ Suite: 248 passed. LIVE E2E with real Kontinent key: plain text (Nairobi), translate (EN→FA), and vision (blue image → "Blue") all succeeded.
+
+### v1.22.1 — Fix: stale model id broke translation + full model list (Completed Sep 2026)
+User bug report: `.tl` translation failed ("Translation failed. Check AI status.") and `.aimodel` showed only 4-5 models.
+- 🐞 Root cause: user's saved `bidar_config.json` still held the OLD id `gemini-3-flash-preview`, which does not exist on Kontinent → every text/vision call 404'd → `.tl` failed.
+- ✅ `load_config()` now auto-heals: any `ai_model` not in the Kontinent catalogue is reset to `gemini-3.5-flash` (and saved). Fixes existing installs on next restart without manual edits.
+- ✅ `.aimodel` now fetches the LIVE catalogue via `GET /v1/models` (`_fetch_kontinent_models`, cached) and lists ALL models (14); rejects unknown ids with the valid list; accepts any live id.
+- ✅ Added `KONTINENT_MODELS` + `KONTINENT_TEXT_DEFAULT`. Version 1.22.1.
+- ✅ Verified by testing_agent (/app/test_reports/iteration_3.json): 254/254 pytest + live script — heal PASS, translate PASS (سلام، حال شما چطور است؟), 14 live models PASS, vision+text PASS.
+- Known minor (non-blocking): load_config heals against the hardcoded tuple (currently identical to the 14 live ids); if Kontinent adds a model later, update the tuple. `_kontinent_chat` labels image data as image/jpeg regardless of source format (worked fine in tests).
 - ✅ Tests: **238 passing** (rewrote TestCmdCheckout: owner success, member-in-allow-group allowed, member-in-non-allow ignored, failure/none handling, Location-header parsing) + real E2E against the live FreeCAD endpoint (all 3 access scenarios)
 
 ### v1.19.0 — `.mergetxt` Merge all .txt files of a chat (Completed Jul 2026)
